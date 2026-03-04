@@ -27,14 +27,18 @@ def doctor(config: str = typer.Option("ese.config.yaml", help="Path to ESE confi
     for role, model in role_models.items():
         typer.echo(f"  - {role}: {model}")
 
+    # Ensemble failures should show the violations and exit.
     if not ok:
-        typer.echo("❌ ESE doctor failed. Fix config and rerun. Run `ese doctor` for details.")
+        typer.echo("❌ ESE doctor failed. Violations:")
+        for v in violations:
+            typer.echo(f"  - {v}")
         raise typer.Exit(code=2)
 
+    # Solo mode returns violations as messages to display.
     if violations:
-        typer.echo("⚠️ Violations detected but allowed (solo mode):")
-        for a, b, model in violations:
-            typer.echo(f"  - {a} and {b} are both {model}")
+        typer.echo("⚠️ Solo mode enabled:")
+        for v in violations:
+            typer.echo(f"  - {v}")
     else:
         typer.echo("✅ Doctor checks passed")
 
@@ -49,7 +53,9 @@ def run(
 
     ok, violations, _ = run_doctor(config_path=config)
     if not ok:
-        typer.echo("❌ ESE doctor failed. Fix config and rerun. Run `ese doctor` for details.")
+        typer.echo("❌ ESE doctor failed. Violations:")
+        for v in violations:
+            typer.echo(f"  - {v}")
         raise typer.Exit(code=2)
 
     summary_path = run_pipeline(cfg=cfg or {}, artifacts_dir=artifacts_dir)
