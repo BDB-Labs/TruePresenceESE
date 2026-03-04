@@ -1,0 +1,14 @@
+[project]
+name = "ese"
+version = "0.1.0"
+description = "Ensemble Software Engineering (ESE) CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "typer>=0.12",
+  "questionary>=2.0",
+  "PyYAML>=6.0",
+]
+
+[project.scripts]
+ese = "ese.cli:app"
