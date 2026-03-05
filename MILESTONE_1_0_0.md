@@ -39,9 +39,9 @@ All items must be complete:
   - [x] Role catalog and role selection behavior documented.
   - [x] Provider/model presets + `custom_api` setup documented.
   - [x] Troubleshooting section for auth/config/adapter failures.
-- [ ] Release process is repeatable.
+- [x] Release process is repeatable.
   - [x] Version bump + changelog process documented.
-  - [ ] GitHub release -> PyPI publish flow validated end to end.
+  - [x] GitHub release -> PyPI publish flow validated end to end.
 
 ## PR plan (mapped work)
 
