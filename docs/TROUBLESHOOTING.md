@@ -33,6 +33,7 @@ Symptoms:
 Checks:
 - Validate top-level keys against [`CONFIG_CONTRACT.md`](CONFIG_CONTRACT.md).
 - Ensure `version: 1` for current releases.
+- Ensure `roles` contains at least one configured role.
 - Ensure `runtime.max_retries` is an integer `>= 0`.
 - Ensure `gating.fail_on_high` is only used with `output.enforce_json: true`.
 - Ensure built-in adapter/provider combinations are compatible (for example `runtime.adapter=openai` requires OpenAI role providers only).
@@ -44,6 +45,7 @@ Symptoms:
 - `No project scope supplied. Set input.scope in the config or pass --scope.`
 
 Checks:
+- Re-run `ese doctor --config ese.config.yaml`; it now fails preflight when scope is missing.
 - Set `input.scope` in `ese.config.yaml`.
 - Or run `ese start --scope "..."` for a one-off override.
 - Regenerate the config with `ese init` if you want the wizard to capture scope for you.

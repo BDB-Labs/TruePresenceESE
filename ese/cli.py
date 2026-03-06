@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 import typer
 
 from ese.config import ConfigValidationError, load_config
-from ese.doctor import run_doctor
+from ese.doctor import evaluate_doctor, run_doctor
 from ese.init_wizard import ROLE_DESCRIPTIONS, run_wizard
 from ese.pipeline import PipelineError, run_pipeline
 
@@ -17,7 +19,7 @@ def init(
     simple: bool = typer.Option(
         True,
         "--simple/--advanced",
-        help="Use simple setup (default) or advanced role-level setup.",
+        help="Use simple setup (default) or advanced role selection with optional per-role model overrides.",
     ),
 ):
     """Create an ESE configuration via an interactive wizard."""
@@ -62,7 +64,19 @@ def doctor(config: str = typer.Option("ese.config.yaml", help="Path to ESE confi
 
 
 def _start_pipeline(config: str, artifacts_dir: str | None, scope: str | None) -> None:
-    ok, violations, _ = run_doctor(config_path=config)
+    try:
+        cfg = load_config(path=config)
+    except ConfigValidationError as err:
+        typer.echo(f"❌ ESE start failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    effective_cfg: dict[str, Any] = dict(cfg or {})
+    if scope and scope.strip():
+        input_cfg = dict(effective_cfg.get("input") or {})
+        input_cfg["scope"] = scope.strip()
+        effective_cfg["input"] = input_cfg
+
+    ok, violations, _ = evaluate_doctor(effective_cfg)
     if not ok:
         typer.echo("❌ ESE doctor failed. Violations:")
         for v in violations:
@@ -70,13 +84,8 @@ def _start_pipeline(config: str, artifacts_dir: str | None, scope: str | None) -
         raise typer.Exit(code=2)
 
     try:
-        cfg = load_config(path=config)
-        if scope and scope.strip():
-            input_cfg = dict((cfg or {}).get("input") or {})
-            input_cfg["scope"] = scope.strip()
-            cfg["input"] = input_cfg
-        summary_path = run_pipeline(cfg=cfg or {}, artifacts_dir=artifacts_dir)
-    except (ConfigValidationError, PipelineError) as err:
+        summary_path = run_pipeline(cfg=effective_cfg, artifacts_dir=artifacts_dir)
+    except PipelineError as err:
         typer.echo(f"❌ ESE start failed: {err}")
         raise typer.Exit(code=2) from err
 

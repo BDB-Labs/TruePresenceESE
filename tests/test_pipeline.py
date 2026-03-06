@@ -154,6 +154,16 @@ def test_pipeline_requires_explicit_scope(tmp_path: Path) -> None:
     assert "Set input.scope in the config or pass --scope" in str(exc.value)
 
 
+def test_pipeline_rejects_empty_role_configuration(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg["roles"] = {}
+
+    with pytest.raises(PipelineError) as exc:
+        run_pipeline(cfg, artifacts_dir=str(tmp_path / "artifacts"))
+
+    assert "No roles configured" in str(exc.value)
+
+
 def test_documentation_writer_prompt_is_specialized() -> None:
     prompt = _role_prompt(
         role="documentation_writer",

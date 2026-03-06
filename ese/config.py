@@ -239,6 +239,13 @@ class ESEConfig(BaseModel):
             raise ValueError("must be either 'ensemble' or 'solo'")
         return cleaned
 
+    @field_validator("roles")
+    @classmethod
+    def _validate_roles_non_empty(cls, value: dict[str, RoleConfig]) -> dict[str, RoleConfig]:
+        if not value:
+            raise ValueError("must include at least one configured role")
+        return value
+
     @model_validator(mode="after")
     def _validate_adapter_contract(self) -> "ESEConfig":
         adapter = self.runtime.adapter.strip().lower()
@@ -362,3 +369,18 @@ def resolve_role_model(cfg: Dict[str, Any], role: str) -> str:
         model = role_cfg["model"]
 
     return f"{provider}:{model}"
+
+
+def resolve_scope_text(cfg: Dict[str, Any]) -> str:
+    """Resolve the best available project scope/prompt text from config."""
+    input_cfg = cfg.get("input") or {}
+    candidates = [
+        input_cfg.get("scope"),
+        cfg.get("scope"),
+        input_cfg.get("prompt"),
+        cfg.get("prompt"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return ""

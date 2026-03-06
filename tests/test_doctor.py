@@ -29,6 +29,9 @@ def _base_cfg() -> dict:
         "runtime": {
             "adapter": "dry-run",
         },
+        "input": {
+            "scope": "Review release readiness for a service hardening change",
+        },
     }
 
 
@@ -71,3 +74,15 @@ def test_doctor_reports_config_validation_error(tmp_path) -> None:
     assert role_models == {}
     assert len(violations) == 1
     assert "unsupported version 9; expected 1" in violations[0]
+
+
+def test_doctor_fails_when_scope_is_missing(tmp_path) -> None:
+    cfg = _base_cfg()
+    cfg.pop("input", None)
+    path = _write_cfg(tmp_path / "ese.config.yaml", cfg)
+
+    ok, violations, role_models = run_doctor(path)
+
+    assert not ok
+    assert "No project scope supplied. Set input.scope in the config or pass --scope." in violations
+    assert set(role_models.keys()) == {"architect", "implementer"}

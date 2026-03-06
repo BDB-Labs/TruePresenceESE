@@ -35,7 +35,8 @@ ese init --advanced
 The wizard now asks for:
 - a real project scope/task,
 - whether this should be a `demo` config (`dry-run`, no API calls) or a `live` config,
-- provider/model defaults appropriate for that choice.
+- provider/model defaults appropriate for that choice,
+- selected roles and optional per-role model overrides in advanced mode.
 
 2. Validate configuration and ensemble constraints:
 

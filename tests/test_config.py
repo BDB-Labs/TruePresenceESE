@@ -53,6 +53,16 @@ def test_validate_config_rejects_version_mismatch() -> None:
     assert "test.yaml" in str(exc.value)
 
 
+def test_validate_config_rejects_empty_roles() -> None:
+    cfg = _base_cfg()
+    cfg["roles"] = {}
+
+    with pytest.raises(ConfigValidationError) as exc:
+        validate_config(cfg, source="test.yaml")
+
+    assert "must include at least one configured role" in str(exc.value)
+
+
 def test_resolve_role_model_prefers_role_override() -> None:
     cfg = _base_cfg()
     cfg["roles"]["architect"] = {"provider": "openrouter", "model": "openai/gpt-5"}

@@ -81,6 +81,13 @@ GOAL_TO_PRESET = {
     "security-heavy": "paranoid",
 }
 
+PRESET_TO_GOAL_PROFILE = {
+    "fast": "fast",
+    "balanced": "balanced",
+    "strict": "high-quality",
+    "paranoid": "security-heavy",
+}
+
 GOAL_DEFAULT_ROLES: Dict[str, list[str]] = {
     "fast": [
         "architect",
@@ -227,6 +234,10 @@ CUSTOM_MODEL_CHOICE = "custom (type model id)"
 RECOMMENDED_MODEL_CHOICE = "recommended"
 COMMON_MODEL_CHOICE = "choose common model"
 CUSTOM_OR_ALIAS_MODEL_CHOICE = "custom or alias"
+INHERIT_GLOBAL_MODEL_CHOICE = "inherit global default"
+ROLE_COMMON_MODEL_CHOICE = "choose another common model"
+ROLE_CUSTOM_MODEL_CHOICE = "custom or alias"
+ROLE_RECOMMENDED_MODEL_CHOICE = "use recommended model"
 
 ROLE_DESCRIPTIONS: Dict[str, str] = {
     "architect": "System design, decomposition, and interface contracts.",
@@ -425,6 +436,77 @@ def _select_default_model(provider: str, goal_profile: str | None = None) -> str
     return model_choice
 
 
+def _select_role_model_override(
+    *,
+    provider: str,
+    role: str,
+    default_model: str,
+    goal_profile: str | None = None,
+) -> str | None:
+    common_models = COMMON_MODELS_BY_PROVIDER.get(provider, [])
+    recommended = RECOMMENDED_MODEL_BY_PROVIDER_GOAL.get(provider, {}).get(goal_profile or "")
+    inherit_choice = f"{INHERIT_GLOBAL_MODEL_CHOICE} ({default_model})"
+    recommended_choice = f"{ROLE_RECOMMENDED_MODEL_CHOICE} ({recommended})" if recommended else None
+
+    choices: list[str] = [inherit_choice]
+    if recommended and recommended != default_model:
+        choices.append(recommended_choice)
+    if common_models:
+        choices.append(ROLE_COMMON_MODEL_CHOICE)
+    choices.append(ROLE_CUSTOM_MODEL_CHOICE)
+
+    selected = questionary.select(
+        f"Model for role '{role}':",
+        choices=choices,
+        default=inherit_choice,
+    ).ask()
+
+    if selected in {default_model, inherit_choice}:
+        return None
+
+    if selected == ROLE_COMMON_MODEL_CHOICE:
+        available_models = [model for model in common_models if model != default_model] or common_models
+        return questionary.select(
+            f"Choose common model for role '{role}':",
+            choices=available_models,
+            default=recommended if recommended in available_models else available_models[0],
+        ).ask()
+
+    if selected == ROLE_CUSTOM_MODEL_CHOICE:
+        return _input_model_id(provider, f"Custom model id for role '{role}':")
+
+    if recommended_choice and selected == recommended_choice:
+        return recommended
+
+    return selected
+
+
+def _apply_advanced_role_model_overrides(
+    roles_cfg: Dict[str, Dict[str, Any]],
+    *,
+    provider: str,
+    selected_roles: list[str],
+    default_model: str,
+    goal_profile: str | None = None,
+) -> None:
+    if not questionary.confirm("Customize models for individual roles?", default=False).ask():
+        return
+
+    for role in selected_roles:
+        override_model = _select_role_model_override(
+            provider=provider,
+            role=role,
+            default_model=default_model,
+            goal_profile=goal_profile,
+        )
+        if not override_model or override_model == default_model:
+            continue
+
+        role_cfg = dict(roles_cfg.get(role) or {})
+        role_cfg["model"] = override_model
+        roles_cfg[role] = role_cfg
+
+
 def _select_execution_mode(provider: str, *, advanced: bool) -> str:
     supports_live = bool(PROVIDER_SUPPORT[provider]["supports_live"])
     choices: list[questionary.Choice] = []
@@ -601,6 +683,7 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
             preset = questionary.select(
                 "Preset:", choices=["fast", "balanced", "strict", "paranoid"],
             ).ask()
+            goal_profile = PRESET_TO_GOAL_PROFILE.get(preset)
             selected_roles = questionary.checkbox(
                 "Select roles for this pipeline (each option includes its responsibility):",
                 choices=_role_choices(),
@@ -621,6 +704,15 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
             validate=_validate_non_empty_text("Project scope"),
         ).ask()
         model = _select_default_model(provider=provider, goal_profile=goal_profile)
+        roles_cfg = _roles_for_preset(preset=preset, selected_roles=selected_roles)
+        if advanced:
+            _apply_advanced_role_model_overrides(
+                roles_cfg,
+                provider=provider,
+                selected_roles=selected_roles,
+                default_model=model,
+                goal_profile=goal_profile,
+            )
         runtime_adapter = _resolve_runtime_adapter(
             provider=provider,
             execution_mode=execution_mode,
@@ -660,7 +752,7 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
                 **provider_cfg,
             },
             "preset": preset,
-            "roles": _roles_for_preset(preset=preset, selected_roles=selected_roles),
+            "roles": roles_cfg,
             "input": {
                 "scope": scope.strip(),
             },

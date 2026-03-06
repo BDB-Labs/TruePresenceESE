@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from ese.init_wizard import (
     _apply_simple_mode_model_diversity,
     _ensemble_constraints,
@@ -97,7 +99,7 @@ def test_run_wizard_rejects_invalid_custom_adapter_before_write(tmp_path: Path, 
             "Ship a demo safely",
             "invalid-adapter",
         ],
-        confirms=[True, True, False],
+        confirms=[False, True, True, False],
         checkboxes=[
             ["architect", "implementer"],
         ],
@@ -107,3 +109,35 @@ def test_run_wizard_rejects_invalid_custom_adapter_before_write(tmp_path: Path, 
 
     assert written is None
     assert not config_path.exists()
+
+
+def test_run_wizard_advanced_supports_per_role_model_overrides(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "ese.config.yaml"
+    _patch_questionary(
+        monkeypatch,
+        selects=[
+            "ensemble",
+            "openai",
+            "demo",
+            "fast",
+            "recommended (gpt-5-mini)",
+            "inherit global default (gpt-5-mini)",
+            "choose another common model",
+            "gpt-5",
+        ],
+        texts=[
+            "Harden the release checklist for a staged rollout",
+        ],
+        confirms=[True, True, True, True],
+        checkboxes=[
+            ["architect", "implementer"],
+        ],
+    )
+
+    written = run_wizard(str(config_path), advanced=True)
+
+    assert written == str(config_path)
+    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert cfg["provider"]["model"] == "gpt-5-mini"
+    assert cfg["roles"]["architect"].get("model") is None
+    assert cfg["roles"]["implementer"]["model"] == "gpt-5"

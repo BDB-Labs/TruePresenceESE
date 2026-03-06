@@ -9,7 +9,7 @@ import textwrap
 from typing import Any, Callable, Dict, Mapping, Protocol
 
 from ese.adapters import AdapterExecutionError, BUILTIN_ADAPTERS
-from ese.config import resolve_role_model
+from ese.config import resolve_role_model, resolve_scope_text
 
 PIPELINE_ORDER = [
     "architect",
@@ -92,29 +92,15 @@ def _normalize_role_order(cfg: Dict[str, Any]) -> list[str]:
     roles_cfg = cfg.get("roles") or {}
     configured_roles = list(roles_cfg.keys()) if isinstance(roles_cfg, dict) else []
     if not configured_roles:
-        return PIPELINE_ORDER.copy()
+        return []
 
     ordered: list[str] = [role for role in PIPELINE_ORDER if role in configured_roles]
     ordered.extend(role for role in configured_roles if role not in ordered)
     return ordered
 
 
-def _build_scope(cfg: Dict[str, Any]) -> str:
-    input_cfg = cfg.get("input") or {}
-    candidates = [
-        input_cfg.get("scope"),
-        cfg.get("scope"),
-        input_cfg.get("prompt"),
-        cfg.get("prompt"),
-    ]
-    for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
-    return ""
-
-
 def _require_scope(cfg: Dict[str, Any]) -> str:
-    scope = _build_scope(cfg)
+    scope = resolve_scope_text(cfg)
     if scope:
         return scope
     raise PipelineError("No project scope supplied. Set input.scope in the config or pass --scope.")
@@ -471,12 +457,15 @@ def _write_summary_and_state(
 def run_pipeline(cfg: Dict[str, Any], artifacts_dir: str | None = None) -> str:
     """Run the ESE pipeline and write per-role artifacts plus summary outputs."""
     artifacts_dir = _resolve_artifacts_dir(cfg, artifacts_dir)
-    os.makedirs(artifacts_dir, exist_ok=True)
 
     provider = (cfg.get("provider") or {}).get("name", "unknown")
     mode = cfg.get("mode", "ensemble")
     scope = _require_scope(cfg)
     role_order = _normalize_role_order(cfg)
+    if not role_order:
+        raise PipelineError("No roles configured. Add at least one role under roles.")
+
+    os.makedirs(artifacts_dir, exist_ok=True)
     adapter_name, adapter = _resolve_adapter(cfg)
     output_cfg = _output_cfg(cfg)
     gating_cfg = _gating_cfg(cfg)

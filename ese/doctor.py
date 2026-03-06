@@ -7,16 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from ese.config import ConfigValidationError, load_config, resolve_role_model
-
-DEFAULT_ROLE_NAMES = [
-    "architect",
-    "implementer",
-    "adversarial_reviewer",
-    "security_auditor",
-    "test_generator",
-    "performance_analyst",
-]
+from ese.config import ConfigValidationError, load_config, resolve_role_model, resolve_scope_text
 
 
 def _collect_role_names(cfg: Dict[str, Any]) -> List[str]:
@@ -41,9 +32,33 @@ def _collect_role_names(cfg: Dict[str, Any]) -> List[str]:
             add(pair[0])
             add(pair[1])
 
-    if roles:
-        return roles
-    return DEFAULT_ROLE_NAMES.copy()
+    return roles
+
+
+def evaluate_doctor(cfg: Dict[str, Any]) -> Tuple[bool, List[str], Dict[str, str]]:
+    mode = (cfg.get("mode") or "ensemble").strip().lower()
+
+    role_names = _collect_role_names(cfg)
+    role_models = {r: resolve_role_model(cfg, r) for r in role_names}
+
+    constraints = cfg.get("constraints") or {}
+    pairs = constraints.get("disallow_same_model_pairs") or []
+
+    violations: List[str] = []
+    if not resolve_scope_text(cfg):
+        violations.append("No project scope supplied. Set input.scope in the config or pass --scope.")
+
+    for a, b in pairs:
+        if role_models.get(a) == role_models.get(b):
+            violations.append(f"{a} and {b} share model {role_models[a]}")
+
+    if violations:
+        return False, violations, role_models
+
+    if mode == "solo":
+        return True, ["SOLO MODE: reduced independence; higher self-confirmation risk."], role_models
+
+    return True, [], role_models
 
 
 def run_doctor(config_path: str) -> Tuple[bool, List[str], Dict[str, str]]:
@@ -52,21 +67,4 @@ def run_doctor(config_path: str) -> Tuple[bool, List[str], Dict[str, str]]:
     except ConfigValidationError as err:
         return False, [str(err)], {}
 
-    mode = (cfg.get("mode") or "ensemble").strip().lower()
-
-    role_names = _collect_role_names(cfg)
-    role_models = {r: resolve_role_model(cfg, r) for r in role_names}
-
-    if mode == "solo":
-        return True, ["SOLO MODE: reduced independence; higher self-confirmation risk."], role_models
-
-    constraints = cfg.get("constraints") or {}
-    pairs = constraints.get("disallow_same_model_pairs") or []
-
-    violations: List[str] = []
-    for a, b in pairs:
-        if role_models.get(a) == role_models.get(b):
-            violations.append(f"{a} and {b} share model {role_models[a]}")
-
-    ok = len(violations) == 0
-    return ok, violations, role_models
+    return evaluate_doctor(cfg)

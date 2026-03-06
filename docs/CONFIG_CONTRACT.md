@@ -9,7 +9,7 @@
 | `version` | int | yes | Must be `1` for current contract. |
 | `mode` | enum | yes | `ensemble` or `solo`. |
 | `provider` | object | yes | Global provider/model defaults. |
-| `roles` | map | yes | Role-specific overrides and metadata. |
+| `roles` | map | yes | Role-specific overrides and metadata. Must contain at least one configured role. |
 | `constraints` | object | no | Ensemble separation checks (for doctor). |
 | `input` | object | no | Human scope/prompt for the run. Required at execution time. |
 | `output` | object | no | Artifact/output behavior flags. |
