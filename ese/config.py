@@ -384,3 +384,16 @@ def resolve_scope_text(cfg: Dict[str, Any]) -> str:
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()
     return ""
+
+
+def resolve_prompt_text(cfg: Dict[str, Any]) -> str:
+    """Resolve supplemental prompt text from config when provided."""
+    input_cfg = cfg.get("input") or {}
+    candidates = [
+        input_cfg.get("prompt"),
+        cfg.get("prompt"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return ""

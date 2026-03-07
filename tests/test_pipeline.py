@@ -228,3 +228,17 @@ def test_release_manager_prompt_is_specialized() -> None:
     lowered = prompt.lower()
     assert "assess release readiness" in lowered
     assert "rollback readiness" in lowered
+
+
+def test_specialist_prompt_includes_additional_context_without_placeholder_noise() -> None:
+    prompt = _role_prompt(
+        role="adversarial_reviewer",
+        scope="Review pull request changes for a billing refactor",
+        outputs={},
+        additional_context="Unified diff:\n+ fix billing edge case",
+        enforce_json=True,
+    )
+
+    assert "Additional Run Context" in prompt
+    assert "Unified diff" in prompt
+    assert "(none provided)" not in prompt

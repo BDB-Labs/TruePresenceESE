@@ -12,6 +12,7 @@ from ese.dashboard import serve_dashboard
 from ese.doctor import evaluate_doctor, run_doctor
 from ese.init_wizard import ROLE_DESCRIPTIONS, run_wizard
 from ese.pipeline import CONFIG_SNAPSHOT_NAME, PipelineError, run_pipeline
+from ese.pr_review import DEFAULT_MAX_DIFF_CHARS, PullRequestReviewError, run_pr_review
 from ese.reports import RunReportError, collect_run_report, render_report_text, render_status_text
 from ese.templates import (
     AUTO_EXECUTION_MODE,
@@ -223,6 +224,57 @@ def task(
 
     adapter_name = str((cfg.get("runtime") or {}).get("adapter") or "dry-run")
     typer.echo(f"✅ Task run completed using template '{template}' via {adapter_name}. Summary: {summary_path}")
+
+
+@app.command("pr")
+def pr(
+    repo_path: str = typer.Option(".", help="Path to the Git repository to review"),
+    pr: str | None = typer.Option(None, help="GitHub PR number or URL (requires gh)"),
+    base: str | None = typer.Option(None, help="Base ref. Defaults from PR metadata or origin/main"),
+    head: str | None = typer.Option(None, help="Head ref. Defaults from PR metadata or HEAD"),
+    title: str | None = typer.Option(None, help="Optional review title override"),
+    focus: str | None = typer.Option(None, help="Optional reviewer focus guidance"),
+    provider: str = typer.Option("openai", help="Provider preset"),
+    execution_mode: str = typer.Option(AUTO_EXECUTION_MODE, help="auto, demo, or live"),
+    artifacts_dir: str = typer.Option("artifacts", help="Directory for review artifacts"),
+    model: str | None = typer.Option(None, help="Optional provider model override"),
+    runtime_adapter: str | None = typer.Option(None, help="Optional module:function adapter for advanced live runs"),
+    provider_name: str | None = typer.Option(None, help="Custom provider name when using custom_api"),
+    base_url: str | None = typer.Option(None, help="Base URL for custom_api live runs"),
+    api_key_env: str | None = typer.Option(None, help="API key environment variable override"),
+    max_diff_chars: int = typer.Option(DEFAULT_MAX_DIFF_CHARS, help="Maximum unified diff characters to embed in review context"),
+    write_config_path: str | None = typer.Option(None, "--write-config", help="Optional path to save the generated config"),
+):
+    """Review a pull request or branch diff and export a GitHub-ready markdown summary."""
+    try:
+        context, cfg, summary_path, review_path = run_pr_review(
+            repo_path=repo_path,
+            pr=pr,
+            base=base,
+            head=head,
+            title=title,
+            focus=focus,
+            provider=provider,
+            execution_mode=execution_mode,
+            artifacts_dir=artifacts_dir,
+            model=model,
+            api_key_env=api_key_env,
+            runtime_adapter=runtime_adapter,
+            provider_name=provider_name,
+            base_url=base_url,
+            max_diff_chars=max_diff_chars,
+            config_path=write_config_path,
+        )
+    except (ConfigValidationError, PipelineError, PullRequestReviewError) as err:
+        typer.echo(f"❌ ESE PR review failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    adapter_name = str((cfg.get("runtime") or {}).get("adapter") or "dry-run")
+    typer.echo(
+        "✅ PR review completed "
+        f"for {context.head_ref} against {context.base_ref} via {adapter_name}. "
+        f"Summary: {summary_path} Review: {review_path}",
+    )
 
 
 @app.command("status")

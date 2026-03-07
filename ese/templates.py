@@ -105,6 +105,20 @@ TASK_TEMPLATES: dict[str, TaskTemplate] = {
         ),
         fail_on_high=False,
     ),
+    "pr-review": TaskTemplate(
+        key="pr-review",
+        title="Pull Request Review",
+        summary="Reviews a Git diff for correctness, security, tests, performance, and merge readiness.",
+        preset="paranoid",
+        goal_profile="security-heavy",
+        roles=(
+            "adversarial_reviewer",
+            "security_auditor",
+            "test_generator",
+            "performance_analyst",
+            "release_manager",
+        ),
+    ),
 }
 
 

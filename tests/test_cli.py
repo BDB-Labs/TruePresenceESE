@@ -167,3 +167,32 @@ def test_status_and_report_commands_summarize_artifacts(tmp_path: Path) -> None:
     assert "Status: completed" in status_result.stdout
     assert report_result.exit_code == 0
     assert "Roles:" in report_result.stdout
+
+
+def test_pr_command_runs_pull_request_review(monkeypatch) -> None:
+    def _fake_run_pr_review(**kwargs):  # noqa: ANN003
+        return (
+            type("Context", (), {"head_ref": "feature", "base_ref": "origin/main"})(),
+            {"runtime": {"adapter": "dry-run"}},
+            "/tmp/artifacts/ese_summary.md",
+            "/tmp/artifacts/pr_review.md",
+        )
+
+    monkeypatch.setattr("ese.cli.run_pr_review", _fake_run_pr_review)
+
+    result = runner.invoke(
+        app,
+        [
+            "pr",
+            "--repo-path",
+            ".",
+            "--base",
+            "origin/main",
+            "--head",
+            "feature",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "PR review completed" in result.stdout
+    assert "pr_review.md" in result.stdout

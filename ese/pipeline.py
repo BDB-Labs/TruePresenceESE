@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, Mapping, Protocol
 import yaml
 
 from ese.adapters import AdapterExecutionError, BUILTIN_ADAPTERS
-from ese.config import resolve_role_model, resolve_scope_text
+from ese.config import resolve_prompt_text, resolve_role_model, resolve_scope_text
 
 PIPELINE_ORDER = [
     "architect",
@@ -175,6 +175,7 @@ def _role_prompt(
     scope: str,
     outputs: Mapping[str, str],
     *,
+    additional_context: str = "",
     enforce_json: bool,
 ) -> str:
     architect_output = outputs.get("architect", "").strip()
@@ -187,6 +188,9 @@ def _role_prompt(
             "Use `artifacts` for concrete deliverables such as docs, runbooks, test files, "
             "rollout checklists, or migration notes."
         )
+    extra_context_block = ""
+    if additional_context.strip():
+        extra_context_block = f"\n\nAdditional Run Context:\n{additional_context.strip()}"
 
     if role == "architect":
         return textwrap.dedent(
@@ -195,6 +199,8 @@ def _role_prompt(
             Produce a concise implementation plan for this scope:
 
             {scope}
+
+            {extra_context_block}
 
             {json_contract}
             """,
@@ -209,14 +215,21 @@ def _role_prompt(
             Scope:
             {scope}
 
-            Architect Plan:
-            {architect_output or "(none provided)"}
+            {extra_context_block}
+
+            {f"Architect Plan:\n{architect_output}" if architect_output else ""}
 
             {json_contract}
             """,
         ).strip()
 
     if role in SPECIALIST_ROLE_INSTRUCTIONS:
+        upstream_sections: list[str] = []
+        if architect_output:
+            upstream_sections.append(f"Architect Plan:\n{architect_output}")
+        if implementer_output:
+            upstream_sections.append(f"Implementer Output:\n{implementer_output}")
+        upstream_text = "\n\n".join(upstream_sections)
         return textwrap.dedent(
             f"""
             You are the {role}.
@@ -225,11 +238,9 @@ def _role_prompt(
             Scope:
             {scope}
 
-            Architect Plan:
-            {architect_output or "(none provided)"}
+            {extra_context_block}
 
-            Implementer Output:
-            {implementer_output or "(none provided)"}
+            {upstream_text}
 
             {artifact_guidance}
 
@@ -245,8 +256,9 @@ def _role_prompt(
         Scope:
         {scope}
 
-        Implementer Output:
-        {implementer_output or "(none provided)"}
+        {extra_context_block}
+
+        {f"Implementer Output:\n{implementer_output}" if implementer_output else ""}
 
         {json_contract}
         """,
@@ -561,6 +573,7 @@ def run_pipeline(
     provider = (cfg.get("provider") or {}).get("name", "unknown")
     mode = cfg.get("mode", "ensemble")
     scope = _require_scope(cfg)
+    additional_context = resolve_prompt_text(cfg)
     role_order = _normalize_role_order(cfg)
     if not role_order:
         raise PipelineError("No roles configured. Add at least one role under roles.")
@@ -583,7 +596,13 @@ def run_pipeline(
 
     for index, role in enumerate(role_order[start_index:], start=start_index + 1):
         model_ref = resolve_role_model(cfg, role)
-        prompt = _role_prompt(role=role, scope=scope, outputs=role_outputs, enforce_json=enforce_json)
+        prompt = _role_prompt(
+            role=role,
+            scope=scope,
+            outputs=role_outputs,
+            additional_context=additional_context,
+            enforce_json=enforce_json,
+        )
         context = _role_context(role=role, outputs=role_outputs)
         output = _invoke_adapter(
             adapter,

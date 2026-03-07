@@ -21,7 +21,7 @@
 | Key | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `scope` | string | no | Recommended primary task/scope field. `ese start` requires this unless `--scope` is provided. |
-| `prompt` | string | no | Alternate free-form input field; used only when `scope` is absent. |
+| `prompt` | string | no | Optional supplemental run context. Used as a fallback when `scope` is absent, and appended to role prompts when both are present. |
 
 ## Provider object
 

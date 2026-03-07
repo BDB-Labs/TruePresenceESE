@@ -90,6 +90,20 @@ Task-first execution without hand-authoring config:
 ese task "Prepare a safer release workflow" --template release-readiness
 ```
 
+Pull request review from a local diff or GitHub PR:
+
+```bash
+ese pr --repo-path . --base origin/main --head HEAD
+```
+
+Or, if you use GitHub CLI:
+
+```bash
+ese pr --repo-path . --pr 42
+```
+
+This writes the usual run artifacts plus `artifacts/pr_review.md`, a GitHub-ready review summary.
+
 Status and aggregated reporting for an artifacts directory:
 
 ```bash
@@ -108,6 +122,8 @@ Launch the local dashboard:
 ```bash
 ese dashboard --artifacts-dir artifacts
 ```
+
+The dashboard now supports both task-first runs and PR review runs.
 
 ## Role catalog
 

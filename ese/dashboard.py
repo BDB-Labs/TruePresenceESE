@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from ese.config import ConfigValidationError, load_config
 from ese.doctor import evaluate_doctor
 from ese.pipeline import run_pipeline
+from ese.pr_review import PullRequestReviewError, run_pr_review
 from ese.reports import RunReportError, collect_run_report
 from ese.templates import list_task_templates, run_task_pipeline
 
@@ -95,6 +96,18 @@ def _run_task_job(**kwargs: Any) -> dict[str, str]:
     return {
         "summary_path": summary_path,
         "artifacts_dir": final_artifacts_dir,
+    }
+
+
+def _run_pr_job(**kwargs: Any) -> dict[str, str]:
+    context, cfg, summary_path, review_path = run_pr_review(**kwargs)
+    final_artifacts_dir = str((cfg.get("output") or {}).get("artifacts_dir") or "artifacts")
+    return {
+        "summary_path": summary_path,
+        "artifacts_dir": final_artifacts_dir,
+        "review_path": review_path,
+        "head_ref": context.head_ref,
+        "base_ref": context.base_ref,
     }
 
 
@@ -364,6 +377,21 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
         <label for="scope">Task Scope</label>
         <textarea id="scope" name="scope" placeholder="Describe the feature, review target, rollout risk, or engineering question."></textarea>
 
+        <label for="review_focus">PR Review Focus</label>
+        <input id="review_focus" name="review_focus" placeholder="Optional reviewer guidance for PR mode">
+
+        <label for="repo_path">Repo Path</label>
+        <input id="repo_path" name="repo_path" placeholder="Path to the Git repo for PR review">
+
+        <label for="pr_ref">PR Number or URL</label>
+        <input id="pr_ref" name="pr_ref" placeholder="Optional GitHub PR number or URL">
+
+        <label for="base_ref">Base Ref</label>
+        <input id="base_ref" name="base_ref" placeholder="Defaults from PR or origin/main">
+
+        <label for="head_ref">Head Ref</label>
+        <input id="head_ref" name="head_ref" placeholder="Defaults from PR or HEAD">
+
         <label for="template">Template</label>
         <select id="template" name="template"></select>
 
@@ -402,7 +430,8 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
         <input id="artifacts_dir" name="artifacts_dir" value="">
 
         <div class="btn-row">
-          <button id="run-button" type="submit">Start Run</button>
+          <button id="run-button" type="submit">Start Task Run</button>
+          <button id="pr-button" type="button">Review PR</button>
           <button id="refresh-button" type="button" class="secondary">Refresh</button>
         </div>
       </form>
@@ -443,6 +472,7 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
     const templateSelect = document.getElementById('template');
     const artifactsInput = document.getElementById('artifacts_dir');
     const configInput = document.getElementById('config_path');
+    const repoInput = document.getElementById('repo_path');
     const heroMeta = document.getElementById('hero-meta');
     const jobStatus = document.getElementById('job-status');
     const metrics = document.getElementById('metrics');
@@ -451,12 +481,14 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
     const rolesEl = document.getElementById('roles');
     const refreshButton = document.getElementById('refresh-button');
     const runButton = document.getElementById('run-button');
+    const prButton = document.getElementById('pr-button');
     const state = {
       artifactsDir: bootstrap.artifacts_dir,
       activeJobId: null,
     };
 
     artifactsInput.value = state.artifactsDir;
+    repoInput.value = bootstrap.repo_path || '';
     if (bootstrap.config_path) {
       configInput.value = bootstrap.config_path;
     }
@@ -613,18 +645,21 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
     async function pollJob(jobId) {
       state.activeJobId = jobId;
       runButton.disabled = true;
+      prButton.disabled = true;
       while (state.activeJobId === jobId) {
         const job = await request(`/api/jobs/${jobId}`);
         jobStatus.innerHTML = `<span class="${statusClass(job.status)}">Job ${job.name}: ${job.status}</span>${job.error ? ` - ${job.error}` : ''}`;
         if (job.status === 'completed') {
           state.activeJobId = null;
           runButton.disabled = false;
+          prButton.disabled = false;
           await loadReport();
           break;
         }
         if (job.status === 'failed') {
           state.activeJobId = null;
           runButton.disabled = false;
+          prButton.disabled = false;
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 1200));
@@ -675,6 +710,36 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
       await pollJob(response.job_id);
     });
 
+    prButton.addEventListener('click', async () => {
+      const repoPath = form.repo_path.value.trim() || bootstrap.repo_path || '.';
+      const reviewFocus = form.review_focus.value.trim() || undefined;
+      if (!repoPath) {
+        jobStatus.textContent = 'Provide a repository path for PR review.';
+        return;
+      }
+
+      const payload = {
+        repo_path: repoPath,
+        pr: form.pr_ref.value.trim() || undefined,
+        base: form.base_ref.value.trim() || undefined,
+        head: form.head_ref.value.trim() || undefined,
+        focus: reviewFocus,
+        provider: form.provider.value,
+        execution_mode: form.execution_mode.value,
+        model: form.model.value.trim() || undefined,
+        base_url: form.base_url.value.trim() || undefined,
+        runtime_adapter: form.runtime_adapter.value.trim() || undefined,
+        artifacts_dir: form.artifacts_dir.value.trim() || bootstrap.artifacts_dir,
+      };
+
+      const response = await request('/api/pr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      await pollJob(response.job_id);
+    });
+
     refreshButton.addEventListener('click', async () => {
       await loadReport();
     });
@@ -708,6 +773,7 @@ def serve_dashboard(
     bootstrap = {
         "artifacts_dir": root_artifacts_dir,
         "config_path": config_path,
+        "repo_path": str(Path.cwd()),
     }
 
     class DashboardHandler(BaseHTTPRequestHandler):
@@ -843,6 +909,25 @@ def serve_dashboard(
                     self._send_json({"job_id": job_id}, status=HTTPStatus.ACCEPTED)
                     return
 
+                if parsed.path == "/api/pr":
+                    job_id = jobs.start(
+                        "pr-review",
+                        _run_pr_job,
+                        repo_path=str(payload.get("repo_path") or "."),
+                        pr=str(payload.get("pr")) if payload.get("pr") else None,
+                        base=str(payload.get("base")) if payload.get("base") else None,
+                        head=str(payload.get("head")) if payload.get("head") else None,
+                        focus=str(payload.get("focus")) if payload.get("focus") else None,
+                        provider=str(payload.get("provider") or "openai"),
+                        execution_mode=str(payload.get("execution_mode") or "auto"),
+                        artifacts_dir=str(payload.get("artifacts_dir") or root_artifacts_dir),
+                        model=str(payload.get("model")) if payload.get("model") else None,
+                        runtime_adapter=str(payload.get("runtime_adapter")) if payload.get("runtime_adapter") else None,
+                        base_url=str(payload.get("base_url")) if payload.get("base_url") else None,
+                    )
+                    self._send_json({"job_id": job_id}, status=HTTPStatus.ACCEPTED)
+                    return
+
                 if parsed.path == "/api/rerun":
                     job_id = jobs.start(
                         "rerun",
@@ -854,7 +939,7 @@ def serve_dashboard(
                     )
                     self._send_json({"job_id": job_id}, status=HTTPStatus.ACCEPTED)
                     return
-            except ConfigValidationError as err:
+            except (ConfigValidationError, PullRequestReviewError) as err:
                 self._send_json({"error": str(err)}, status=HTTPStatus.BAD_REQUEST)
                 return
 
