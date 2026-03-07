@@ -159,6 +159,21 @@ class CustomAPIRuntimeConfig(BaseModel):
         return cleaned
 
 
+class LocalRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    base_url: str = "http://localhost:11434/v1"
+    use_openai_compat_auth: bool = True
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must be a non-empty string")
+        return cleaned
+
+
 class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -169,6 +184,7 @@ class RuntimeConfig(BaseModel):
     max_output_tokens: int | None = None
     openai: OpenAIRuntimeConfig = Field(default_factory=OpenAIRuntimeConfig)
     custom_api: CustomAPIRuntimeConfig | None = None
+    local: LocalRuntimeConfig = Field(default_factory=LocalRuntimeConfig)
 
     @field_validator("adapter")
     @classmethod
@@ -176,12 +192,12 @@ class RuntimeConfig(BaseModel):
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("must be a non-empty string")
-        builtin_adapters = {"dry-run", "openai", "custom_api"}
+        builtin_adapters = {"dry-run", "openai", "local", "custom_api"}
         if cleaned not in builtin_adapters:
             module_name, separator, object_name = cleaned.partition(":")
             if not separator or not module_name.strip() or not object_name.strip():
                 raise ValueError(
-                    "must be one of {'dry-run', 'openai', 'custom_api'} or use 'module:function' format",
+                    "must be one of {'dry-run', 'openai', 'local', 'custom_api'} or use 'module:function' format",
                 )
         return cleaned
 
@@ -273,6 +289,23 @@ class ESEConfig(BaseModel):
                 details = ", ".join(incompatible_roles)
                 raise ValueError(
                     "runtime.adapter=openai requires all role providers to resolve to 'openai' "
+                    f"(found {details})",
+                )
+            return self
+
+        if adapter == "local":
+            if provider_name != "local":
+                raise ValueError("runtime.adapter=local requires provider.name='local'")
+
+            incompatible_roles = [
+                f"{role}={resolved_provider}"
+                for role, resolved_provider in role_providers.items()
+                if resolved_provider != "local"
+            ]
+            if incompatible_roles:
+                details = ", ".join(incompatible_roles)
+                raise ValueError(
+                    "runtime.adapter=local requires all role providers to resolve to 'local' "
                     f"(found {details})",
                 )
             return self

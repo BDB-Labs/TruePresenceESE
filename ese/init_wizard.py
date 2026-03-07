@@ -52,9 +52,9 @@ PROVIDER_SUPPORT = {
         "supports_live": False,
     },
     "local": {
-        "live_title": "local - requires custom module adapter",
-        "demo_title": "local - demo only unless you bring a custom adapter",
-        "supports_live": False,
+        "live_title": "local - built-in Ollama adapter",
+        "demo_title": "local - demo or built-in Ollama adapter",
+        "supports_live": True,
     },
     "custom_api": {
         "live_title": "custom_api - Responses-compatible gateway",
@@ -559,7 +559,7 @@ def _resolve_runtime_adapter(
     if execution_mode == DEMO_EXECUTION_MODE:
         return "dry-run"
     if execution_mode == LIVE_EXECUTION_MODE:
-        if provider in {"openai", "custom_api"}:
+        if provider in {"openai", "local", "custom_api"}:
             return provider
         if not advanced:
             return "dry-run"
@@ -726,6 +726,13 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
                 default=_default_api_key_env(provider),
                 validate=_validate_non_empty_text("API key environment variable"),
             ).ask()
+        if runtime_adapter == "local":
+            local_base_url = questionary.text(
+                "Local base URL (default Ollama OpenAI-compatible endpoint):",
+                default="http://localhost:11434/v1",
+                validate=_validate_non_empty_text("Local base URL"),
+            ).ask()
+            provider_cfg["base_url"] = local_base_url.strip()
         if runtime_adapter == "custom_api":
             custom_base_url = questionary.text(
                 "Custom API base URL (required, e.g., https://gateway.example/v1):",
@@ -776,6 +783,11 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
         if runtime_adapter == "openai":
             cfg["runtime"]["openai"] = {
                 "base_url": provider_cfg.get("base_url", "https://api.openai.com/v1"),
+            }
+        if runtime_adapter == "local":
+            cfg["runtime"]["local"] = {
+                "base_url": provider_cfg.get("base_url", "http://localhost:11434/v1"),
+                "use_openai_compat_auth": True,
             }
         if runtime_adapter == "custom_api":
             cfg["runtime"]["custom_api"] = {

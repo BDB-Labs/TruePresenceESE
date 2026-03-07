@@ -36,12 +36,14 @@
 
 | Key | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `adapter` | string | no | Built-ins: `dry-run`, `openai`, `custom_api`; or `module:function`. |
+| `adapter` | string | no | Built-ins: `dry-run`, `openai`, `local`, `custom_api`; or `module:function`. |
 | `timeout_seconds` | float | no | Must be `> 0`. |
 | `max_retries` | int | no | Must be `>= 0`. |
 | `retry_backoff_seconds` | float | no | Must be `> 0`. |
 | `max_output_tokens` | int | no | Must be `> 0` when set. |
 | `openai.base_url` | string | no | Optional OpenAI endpoint override. |
+| `local.base_url` | string | no | Optional Ollama OpenAI-compatible endpoint override. Defaults to `http://localhost:11434/v1`. |
+| `local.use_openai_compat_auth` | bool | no | Sends `Bearer ollama` for clients/endpoints that expect OpenAI-style auth headers. Defaults to `true`. |
 | `custom_api.base_url` | string | no | Optional custom API endpoint override. |
 
 ## Output object
@@ -62,6 +64,13 @@
 When `runtime.adapter=openai`:
 - `provider.name` must be `openai`.
 - All role providers must resolve to `openai`.
+
+## `local` validation rules
+
+When `runtime.adapter=local`:
+- `provider.name` must be `local`.
+- All role providers must resolve to `local`.
+- ESE expects an Ollama-compatible endpoint, defaulting to `http://localhost:11434/v1`.
 
 ## Demo configs
 

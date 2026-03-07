@@ -172,6 +172,8 @@ def _resolve_execution_mode(
         raise ConfigValidationError(f"Unsupported execution mode '{requested_mode}'. Choose one of: {available}")
 
     if mode == AUTO_EXECUTION_MODE:
+        if provider == "local":
+            return LIVE_EXECUTION_MODE
         if provider == "custom_api":
             api_key_present = bool(os.getenv(_default_api_key_env(provider)))
             return LIVE_EXECUTION_MODE if api_key_present and bool(base_url) else DEMO_EXECUTION_MODE
@@ -257,7 +259,7 @@ def build_task_config(
         cfg["runtime"]["adapter"] = "dry-run"
     elif runtime_adapter:
         cfg["runtime"]["adapter"] = runtime_adapter.strip()
-    elif clean_provider in {"openai", "custom_api"}:
+    elif clean_provider in {"openai", "local", "custom_api"}:
         cfg["runtime"]["adapter"] = clean_provider
     else:
         raise ConfigValidationError(
@@ -270,6 +272,12 @@ def build_task_config(
     if cfg["runtime"]["adapter"] == "openai":
         cfg["runtime"]["openai"] = {
             "base_url": "https://api.openai.com/v1",
+        }
+
+    if cfg["runtime"]["adapter"] == "local":
+        cfg["runtime"]["local"] = {
+            "base_url": (base_url or "http://localhost:11434/v1").strip(),
+            "use_openai_compat_auth": True,
         }
 
     if cfg["runtime"]["adapter"] == "custom_api":

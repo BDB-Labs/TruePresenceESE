@@ -10,6 +10,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Mapping
 
+from ese.local_runtime import ensure_local_runtime_ready, local_base_url
+
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_CUSTOM_API_KEY_ENV = "CUSTOM_API_KEY"
 
@@ -123,6 +125,14 @@ def _runtime_custom_api_cfg(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
     return {}
 
 
+def _runtime_local_cfg(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
+    runtime = _runtime_cfg(cfg)
+    local_cfg = runtime.get("local")
+    if isinstance(local_cfg, Mapping):
+        return local_cfg
+    return {}
+
+
 def _openai_base_url(cfg: Mapping[str, Any]) -> str:
     provider_cfg = _provider_cfg(cfg)
     openai_cfg = _runtime_openai_cfg(cfg)
@@ -145,6 +155,13 @@ def _custom_api_base_url(cfg: Mapping[str, Any]) -> str:
         raise AdapterExecutionError(
             "Custom API base URL is required. Set provider.base_url or runtime.custom_api.base_url.",
         )
+    return base_url.rstrip("/")
+
+
+def _local_base_url(cfg: Mapping[str, Any]) -> str:
+    base_url = local_base_url(cfg)
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise AdapterExecutionError("Local base URL must be a non-empty string")
     return base_url.rstrip("/")
 
 
@@ -258,7 +275,7 @@ def _truncate_for_error(text: str, limit: int = 500) -> str:
 def _execute_responses_request(
     *,
     url: str,
-    api_key: str,
+    api_key: str | None,
     payload: Mapping[str, Any],
     timeout_seconds: float,
     max_retries: int,
@@ -267,13 +284,15 @@ def _execute_responses_request(
     provider_name: str,
 ) -> str:
     body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(
         url,
         data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
         method="POST",
     )
 
@@ -410,8 +429,62 @@ def custom_api_adapter(
     )
 
 
+def local_adapter(
+    *,
+    role: str,
+    model: str,
+    prompt: str,
+    context: Mapping[str, str],
+    cfg: Mapping[str, Any],
+) -> str:
+    """Execute role prompt against a local Ollama runtime."""
+    provider_name, model_name = _parse_provider_model(model)
+    if provider_name != "local":
+        raise AdapterExecutionError(
+            f"Local adapter requires local:* model refs, received '{model}'",
+        )
+    if not model_name:
+        raise AdapterExecutionError("Local model reference is missing model name")
+
+    runtime_cfg = _runtime_cfg(cfg)
+    timeout_seconds = _runtime_number(runtime_cfg, "timeout_seconds", 60.0)
+    max_retries = int(_runtime_number(runtime_cfg, "max_retries", 2, allow_zero=True))
+    retry_backoff_seconds = _runtime_number(runtime_cfg, "retry_backoff_seconds", 1.0)
+
+    try:
+        ensure_local_runtime_ready(cfg, auto_start=True, require_models=True)
+    except Exception as err:  # noqa: BLE001
+        raise AdapterExecutionError(str(err)) from err
+
+    payload = _openai_payload(
+        role=role,
+        model_name=model_name,
+        prompt=prompt,
+        context=context,
+        cfg=cfg,
+    )
+    local_cfg = _runtime_local_cfg(cfg)
+    base_url = _local_base_url(cfg)
+    api_key = None
+    if bool(local_cfg.get("use_openai_compat_auth", True)):
+        api_key = "ollama"
+    url = f"{base_url}/responses"
+
+    return _execute_responses_request(
+        url=url,
+        api_key=api_key,
+        payload=payload,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        retry_backoff_seconds=retry_backoff_seconds,
+        auth_error_message="Local adapter authentication failed unexpectedly.",
+        provider_name="Local adapter",
+    )
+
+
 BUILTIN_ADAPTERS = {
     "dry-run": dry_run_adapter,
     "openai": openai_adapter,
+    "local": local_adapter,
     "custom_api": custom_api_adapter,
 }

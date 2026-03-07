@@ -24,6 +24,20 @@ flowchart TD
 pip install ese-cli
 ```
 
+Homebrew install from the dedicated tap:
+
+```bash
+brew tap Excelsior2026/ese https://github.com/Excelsior2026/homebrew-ese
+brew install ese-cli
+```
+
+If you want local models via Ollama:
+
+```bash
+brew install ollama
+brew services start ollama
+```
+
 ## One-Command Local Start
 
 There is now a local GUI: the ESE dashboard.
@@ -38,6 +52,10 @@ That script will:
 - create `.venv` if needed,
 - install/update the package in the virtualenv,
 - start the local dashboard GUI.
+
+If you run a `local`/Ollama-backed workflow through the launcher, it now:
+- auto-starts Ollama when it is installed but not running,
+- prompts you to install Ollama or switch to a hosted provider when Ollama is missing.
 
 Other common launcher modes:
 
@@ -170,6 +188,7 @@ Wizard provider presets: `openai`, `anthropic`, `google`, `xai`, `openrouter`, `
 Built-in runtime adapters:
 - `dry-run`: deterministic placeholder artifacts, no API calls.
 - `openai`: OpenAI Responses API adapter with retry/timeout handling.
+- `local`: Ollama-backed local adapter using the OpenAI-compatible endpoint.
 - `custom_api`: Responses-compatible custom provider adapter with validated base URL and auth env var.
 - `module:function`: custom Python callable adapter.
 
@@ -178,7 +197,7 @@ When `output.enforce_json: true`, adapters must return valid JSON role reports a
 ## Demo vs live setup
 
 - `demo`: writes a safe `dry-run` config using the selected provider/model defaults. This is the prudent path for first-time setup, local walkthroughs, and providers without native live adapters.
-- `live`: uses the built-in runtime only for `openai` and `custom_api`.
+- `live`: uses the built-in runtime for `openai`, `local` (Ollama), and `custom_api`.
 - Other providers remain available for model selection in the wizard, but live execution requires an explicit `module:function` adapter in advanced mode.
 
 ### OpenAI runtime example

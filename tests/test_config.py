@@ -141,3 +141,23 @@ def test_validate_config_rejects_invalid_custom_adapter_format() -> None:
         validate_config(cfg, source="test.yaml")
 
     assert "module:function" in str(exc.value)
+
+
+def test_validate_config_accepts_local_adapter() -> None:
+    cfg = _base_cfg()
+    cfg["provider"] = {
+        "name": "local",
+        "model": "qwen2.5-coder:14b",
+        "base_url": "http://localhost:11434/v1",
+    }
+    cfg["roles"] = {
+        "architect": {},
+        "implementer": {"model": "llama3.1:8b"},
+    }
+    cfg["runtime"]["adapter"] = "local"
+    cfg["runtime"]["local"] = {"base_url": "http://localhost:11434/v1"}
+
+    validated = validate_config(cfg, source="test.yaml")
+
+    assert validated["runtime"]["adapter"] == "local"
+    assert validated["runtime"]["local"]["base_url"] == "http://localhost:11434/v1"

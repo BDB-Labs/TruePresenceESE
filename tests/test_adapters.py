@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ese.adapters import AdapterExecutionError, custom_api_adapter, openai_adapter
+from ese.adapters import AdapterExecutionError, custom_api_adapter, local_adapter, openai_adapter
 
 
 class _FakeResponse:
@@ -121,3 +121,45 @@ def test_custom_api_adapter_success(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert output == "ok"
+
+
+def test_local_adapter_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = {
+        "provider": {
+            "name": "local",
+            "model": "qwen2.5-coder:14b",
+            "base_url": "http://localhost:11434/v1",
+        },
+        "roles": {
+            "architect": {},
+        },
+        "runtime": {
+            "adapter": "local",
+            "timeout_seconds": 30,
+            "max_retries": 0,
+            "retry_backoff_seconds": 0.1,
+            "local": {"base_url": "http://localhost:11434/v1"},
+        },
+    }
+
+    monkeypatch.setattr("ese.adapters.ensure_local_runtime_ready", lambda cfg, auto_start=True, require_models=True: None)
+
+    def _fake_urlopen(request, timeout):  # noqa: ANN001
+        assert timeout == 30
+        assert request.full_url == "http://localhost:11434/v1/responses"
+        payload = json.loads(request.data.decode("utf-8"))
+        assert payload["model"] == "qwen2.5-coder:14b"
+        assert request.headers["Authorization"] == "Bearer ollama"
+        return _FakeResponse(json.dumps({"output_text": "local ok"}))
+
+    monkeypatch.setattr("ese.adapters.urllib.request.urlopen", _fake_urlopen)
+
+    output = local_adapter(
+        role="architect",
+        model="local:qwen2.5-coder:14b",
+        prompt="test prompt",
+        context={},
+        cfg=cfg,
+    )
+
+    assert output == "local ok"

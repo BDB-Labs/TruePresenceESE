@@ -73,6 +73,21 @@ Checks:
 - Validate upstream provider/gateway reliability.
 - Ensure custom adapters return the required JSON report object when `output.enforce_json: true`.
 
+## Local runtime / Ollama failures
+
+Symptoms:
+- `Local runtime selected but Ollama is not installed...`
+- `Local runtime selected but Ollama is not running...`
+- `Ollama is running but required local models are missing...`
+- `Connection refused` when using `runtime.adapter=local`
+
+Checks:
+- Install Ollama from [ollama.com/download](https://ollama.com/download) or via Homebrew.
+- Start Ollama with `ollama serve` or `brew services start ollama`.
+- Ensure `runtime.local.base_url` points to the actual Ollama endpoint. Default: `http://localhost:11434/v1`.
+- Pull every referenced local model, for example `ollama pull qwen2.5-coder:14b`.
+- If you use the repo launcher, `./start_ese.sh` will now auto-start installed Ollama for local runs and prompt you to install it or switch providers when missing.
+
 ## Gated pipeline failures
 
 Symptoms:
