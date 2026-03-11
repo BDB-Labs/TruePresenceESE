@@ -6,6 +6,7 @@ import json
 import threading
 import uuid
 import webbrowser
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,7 +17,7 @@ from ese.config import ConfigValidationError, load_config
 from ese.doctor import evaluate_doctor
 from ese.pipeline import run_pipeline
 from ese.pr_review import PullRequestReviewError, run_pr_review
-from ese.reports import RunReportError, collect_run_report
+from ese.reports import RunReportError, collect_run_report, list_recent_runs, load_artifact_view
 from ese.templates import list_task_templates, run_task_pipeline
 
 
@@ -135,6 +136,21 @@ def _rerun_job(
         "summary_path": summary_path,
         "artifacts_dir": artifacts_dir,
     }
+
+
+def _allocate_run_artifacts_dir(base_dir: str, *, kind: str) -> str:
+    requested = Path(base_dir)
+    root = requested.parent if (requested / "pipeline_state.json").exists() else requested
+    root.mkdir(parents=True, exist_ok=True)
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    base_name = f"{stamp}-{kind}"
+    candidate = root / base_name
+    suffix = 2
+    while candidate.exists():
+        candidate = root / f"{base_name}-{suffix}"
+        suffix += 1
+    return str(candidate)
 
 
 def _dashboard_html(bootstrap: dict[str, Any]) -> str:
@@ -353,6 +369,37 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
       font-size: 0.92rem;
       word-break: break-all;
     }
+    .viewer {
+      display: grid;
+      gap: 12px;
+    }
+    .viewer-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .viewer pre {
+      margin: 0;
+      max-height: 460px;
+      overflow: auto;
+      padding: 16px;
+      border-radius: 16px;
+      background: rgba(18, 24, 30, 0.94);
+      color: #f5efe6;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .history-card.active {
+      border-color: rgba(184, 92, 56, 0.45);
+      box-shadow: inset 0 0 0 1px rgba(184, 92, 56, 0.18);
+    }
+    .history-card .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
     .tiny {
       font-size: 0.82rem;
       color: var(--muted);
@@ -445,6 +492,10 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
         <div id="job-status" class="muted">No active job.</div>
       </section>
       <section class="metrics" id="metrics"></section>
+      <section class="panel section">
+        <h2>Recent Runs</h2>
+        <div id="history" class="list"></div>
+      </section>
       <section class="sections">
         <div class="panel section">
           <h2>Roles</h2>
@@ -454,6 +505,10 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
           <section class="panel section">
             <h2>Blockers</h2>
             <div id="blockers"></div>
+          </section>
+          <section class="panel section">
+            <h2>Artifact Viewer</h2>
+            <div id="viewer" class="viewer"></div>
           </section>
           <section class="panel section">
             <h2>Next Steps</h2>
@@ -476,15 +531,19 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
     const heroMeta = document.getElementById('hero-meta');
     const jobStatus = document.getElementById('job-status');
     const metrics = document.getElementById('metrics');
+    const historyEl = document.getElementById('history');
     const blockersEl = document.getElementById('blockers');
     const nextStepsEl = document.getElementById('next-steps');
     const rolesEl = document.getElementById('roles');
+    const viewerEl = document.getElementById('viewer');
     const refreshButton = document.getElementById('refresh-button');
     const runButton = document.getElementById('run-button');
     const prButton = document.getElementById('pr-button');
     const state = {
       artifactsDir: bootstrap.artifacts_dir,
       activeJobId: null,
+      history: [],
+      selectedArtifact: null,
     };
 
     artifactsInput.value = state.artifactsDir;
@@ -501,6 +560,13 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
         throw new Error(data.error || data.message || 'Request failed');
       }
       return data;
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
     }
 
     function renderTemplates(templates) {
@@ -535,23 +601,76 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
         heroMeta.innerHTML = `<div class="pill">No report loaded</div>`;
         return;
       }
+      const documentButtons = (report.documents || []).map((document) => `
+        <button type="button" class="secondary" data-open-document="${document.key}">${escapeHtml(document.title)}</button>
+      `).join('');
       const pills = [
         report.status ? `<span class="pill ${statusClass(report.status)}">Status: ${report.status}</span>` : '',
-        report.provider ? `<span class="pill">Provider: ${report.provider}</span>` : '',
-        report.adapter ? `<span class="pill">Adapter: ${report.adapter}</span>` : '',
+        report.provider ? `<span class="pill">Provider: ${escapeHtml(report.provider)}</span>` : '',
+        report.adapter ? `<span class="pill">Adapter: ${escapeHtml(report.adapter)}</span>` : '',
         report.scope ? `<span class="pill">Scope captured</span>` : '',
       ].filter(Boolean).join('');
       heroMeta.innerHTML = `
         ${pills}
-        ${report.scope ? `<h2 style="margin-top:12px; margin-bottom:8px;">${report.scope}</h2>` : ''}
-        <div class="tiny mono">${report.artifacts_dir || ''}</div>
+        ${report.scope ? `<h2 style="margin-top:12px; margin-bottom:8px;">${escapeHtml(report.scope)}</h2>` : ''}
+        <div class="tiny mono">${escapeHtml(report.artifacts_dir || '')}</div>
+        ${report.updated_at ? `<div class="tiny">Updated ${escapeHtml(report.updated_at)}</div>` : ''}
+        ${documentButtons ? `<div class="viewer-actions" style="margin-top:12px;">${documentButtons}</div>` : ''}
       `;
+
+      heroMeta.querySelectorAll('[data-open-document]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          state.selectedArtifact = { document: button.dataset.openDocument };
+          await loadArtifactView();
+        });
+      });
     }
 
     function findingClass(severity) {
       if (severity === 'HIGH' || severity === 'CRITICAL') return 'bad';
       if (severity === 'LOW') return 'good';
       return '';
+    }
+
+    function renderHistory(runs) {
+      state.history = runs || [];
+      if (!state.history.length) {
+        historyEl.innerHTML = `<div class="empty">No completed runs found in this workspace yet.</div>`;
+        return;
+      }
+
+      historyEl.innerHTML = state.history.map((run) => {
+        const isActive = run.artifacts_dir === state.artifactsDir ? 'active' : '';
+        const scope = run.scope || 'No scope captured';
+        return `
+          <article class="card history-card ${isActive}">
+            <div class="role-header">
+              <div>
+                <h3>${escapeHtml(scope)}</h3>
+                <div class="role-meta">${escapeHtml(run.updated_at || '')}</div>
+              </div>
+              <button type="button" class="secondary" data-load-run="${run.artifacts_dir}">Load Run</button>
+            </div>
+            <div class="meta-row">
+              <span class="pill ${statusClass(run.status)}">${run.status || 'unknown'}</span>
+              <span class="pill">roles ${run.role_count || 0}</span>
+              <span class="pill">findings ${run.finding_count || 0}</span>
+              <span class="pill">blockers ${run.blocker_count || 0}</span>
+            </div>
+            ${run.failure ? `<div class="tiny" style="margin-top:10px;">Failure: ${escapeHtml(run.failure)}</div>` : ''}
+            <div class="tiny mono" style="margin-top:10px;">${escapeHtml(run.artifacts_dir)}</div>
+          </article>
+        `;
+      }).join('');
+
+      historyEl.querySelectorAll('[data-load-run]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          state.artifactsDir = button.dataset.loadRun;
+          artifactsInput.value = state.artifactsDir;
+          state.selectedArtifact = null;
+          await loadReport();
+        });
+      });
     }
 
     function renderRoles(report) {
@@ -563,28 +682,37 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
       rolesEl.innerHTML = roles.map((role) => {
         const findings = (role.findings || []).map((finding) => `
           <div class="finding ${findingClass(finding.severity)}">
-            <strong>${finding.severity}</strong> ${finding.title || 'Untitled finding'}
-            ${finding.details ? `<div class="tiny">${finding.details}</div>` : ''}
+            <strong>${escapeHtml(finding.severity)}</strong> ${escapeHtml(finding.title || 'Untitled finding')}
+            ${finding.details ? `<div class="tiny">${escapeHtml(finding.details)}</div>` : ''}
           </div>
         `).join('');
-        const nextSteps = (role.next_steps || []).map((step) => `<div class="tiny">Next: ${step}</div>`).join('');
+        const nextSteps = (role.next_steps || []).map((step) => `<div class="tiny">Next: ${escapeHtml(step)}</div>`).join('');
         return `
           <article class="card">
             <div class="role-header">
               <div>
-                <h3>${role.role}</h3>
-                <div class="role-meta">${role.model || ''}</div>
+                <h3>${escapeHtml(role.role)}</h3>
+                <div class="role-meta">${escapeHtml(role.model || '')}</div>
               </div>
-              <button type="button" class="secondary" data-rerun-role="${role.role}">Rerun From Here</button>
+              <div class="viewer-actions">
+                <button type="button" class="secondary" data-view-role="${role.role}">View Artifact</button>
+                <button type="button" class="secondary" data-rerun-role="${role.role}">Rerun From Here</button>
+              </div>
             </div>
-            <p>${role.summary || 'No summary provided.'}</p>
-            <div class="tiny mono">${role.artifact}</div>
+            <p>${escapeHtml(role.summary || 'No summary provided.')}</p>
+            <div class="tiny mono">${escapeHtml(role.artifact)}</div>
             ${findings || '<div class="tiny muted">No findings.</div>'}
             ${nextSteps}
           </article>
         `;
       }).join('');
 
+      rolesEl.querySelectorAll('[data-view-role]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          state.selectedArtifact = { role: button.dataset.viewRole };
+          await loadArtifactView();
+        });
+      });
       rolesEl.querySelectorAll('[data-rerun-role]').forEach((button) => {
         button.addEventListener('click', async () => {
           await rerunFromRole(button.dataset.rerunRole);
@@ -600,9 +728,9 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
       }
       blockersEl.innerHTML = blockers.map((blocker) => `
         <article class="card">
-          <div><strong>${blocker.role}</strong> <span class="pill">${blocker.severity}</span></div>
-          <div style="margin-top:6px;">${blocker.title || 'Untitled blocker'}</div>
-          ${blocker.details ? `<div class="tiny">${blocker.details}</div>` : ''}
+          <div><strong>${escapeHtml(blocker.role)}</strong> <span class="pill">${escapeHtml(blocker.severity)}</span></div>
+          <div style="margin-top:6px;">${escapeHtml(blocker.title || 'Untitled blocker')}</div>
+          ${blocker.details ? `<div class="tiny">${escapeHtml(blocker.details)}</div>` : ''}
         </article>
       `).join('');
     }
@@ -615,30 +743,95 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
       }
       nextStepsEl.innerHTML = nextSteps.map((item) => `
         <article class="card">
-          <strong>${item.role}</strong>
-          <div>${item.text}</div>
+          <strong>${escapeHtml(item.role)}</strong>
+          <div>${escapeHtml(item.text)}</div>
         </article>
       `).join('');
     }
 
-    async function loadReport() {
-      state.artifactsDir = artifactsInput.value.trim() || bootstrap.artifacts_dir;
+    function renderArtifactView(view) {
+      if (!view) {
+        viewerEl.innerHTML = `<div class="empty">Select a summary document or role artifact to inspect the raw output.</div>`;
+        return;
+      }
+      viewerEl.innerHTML = `
+        <div>
+          <strong>${escapeHtml(view.title || 'Artifact')}</strong>
+          <div class="tiny mono" style="margin-top:6px;">${escapeHtml(view.path || '')}</div>
+          ${view.summary ? `<div class="tiny" style="margin-top:8px;">${escapeHtml(view.summary)}</div>` : ''}
+          ${view.truncated ? `<div class="tiny" style="margin-top:8px;">Showing the first part of a large artifact.</div>` : ''}
+        </div>
+        <pre>${escapeHtml(view.content || '')}</pre>
+      `;
+    }
+
+    async function loadHistory() {
+      const response = await request(`/api/history?artifacts_dir=${encodeURIComponent(state.artifactsDir)}`);
+      renderHistory(response.runs || []);
+      return response.runs || [];
+    }
+
+    async function loadArtifactView() {
+      if (!state.selectedArtifact) {
+        renderArtifactView(null);
+        return;
+      }
+      const query = new URLSearchParams({ artifacts_dir: state.artifactsDir });
+      if (state.selectedArtifact.role) {
+        query.set('role', state.selectedArtifact.role);
+      }
+      if (state.selectedArtifact.document) {
+        query.set('document', state.selectedArtifact.document);
+      }
+      try {
+        const view = await request(`/api/artifact?${query.toString()}`);
+        renderArtifactView(view);
+      } catch (error) {
+        renderArtifactView({
+          title: 'Artifact Unavailable',
+          path: '',
+          content: error.message,
+          truncated: false,
+        });
+      }
+    }
+
+    async function loadReport(options = {}) {
+      const { preferLatest = false } = options;
+      state.artifactsDir = artifactsInput.value.trim() || state.artifactsDir || bootstrap.artifacts_dir;
+      const runs = await loadHistory();
       try {
         const report = await request(`/api/report?artifacts_dir=${encodeURIComponent(state.artifactsDir)}`);
         if (report.config_snapshot && !configInput.value) {
           configInput.value = report.config_snapshot;
+        }
+        if (!state.selectedArtifact) {
+          if ((report.documents || []).length) {
+            state.selectedArtifact = { document: report.documents[0].key };
+          } else if ((report.roles || []).length) {
+            state.selectedArtifact = { role: report.roles[0].role };
+          }
         }
         renderHero(report);
         renderMetrics(report);
         renderRoles(report);
         renderBlockers(report);
         renderNextSteps(report);
+        await loadArtifactView();
       } catch (error) {
+        if (preferLatest && runs.length && runs[0].artifacts_dir !== state.artifactsDir) {
+          state.artifactsDir = runs[0].artifacts_dir;
+          artifactsInput.value = state.artifactsDir;
+          state.selectedArtifact = null;
+          await loadReport();
+          return;
+        }
         renderHero(null);
         renderMetrics(null);
         renderRoles(null);
         blockersEl.innerHTML = `<div class="empty">${error.message}</div>`;
         nextStepsEl.innerHTML = `<div class="empty">No next steps available.</div>`;
+        renderArtifactView(null);
       }
     }
 
@@ -653,6 +846,14 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
           state.activeJobId = null;
           runButton.disabled = false;
           prButton.disabled = false;
+          if (job.result?.artifacts_dir) {
+            state.artifactsDir = job.result.artifacts_dir;
+            artifactsInput.value = state.artifactsDir;
+          }
+          if (job.result?.config_snapshot && !configInput.value) {
+            configInput.value = job.result.config_snapshot;
+          }
+          state.selectedArtifact = null;
           await loadReport();
           break;
         }
@@ -747,7 +948,7 @@ def _dashboard_html(bootstrap: dict[str, Any]) -> str:
     async function boot() {
       const templates = await request('/api/templates');
       renderTemplates(templates.templates);
-      await loadReport();
+      await loadReport({ preferLatest: true });
     }
 
     boot().catch((error) => {
@@ -841,6 +1042,26 @@ def serve_dashboard(
                 self._send_json(report)
                 return
 
+            if parsed.path == "/api/history":
+                self._send_json({"runs": list_recent_runs(self._artifacts_dir_from_query())})
+                return
+
+            if parsed.path == "/api/artifact":
+                query = parse_qs(parsed.query)
+                role = query.get("role", [""])[0].strip() or None
+                document = query.get("document", [""])[0].strip() or None
+                try:
+                    payload = load_artifact_view(
+                        self._artifacts_dir_from_query(),
+                        role=role,
+                        document=document,
+                    )
+                except RunReportError as err:
+                    self._send_json({"error": str(err)}, status=HTTPStatus.NOT_FOUND)
+                    return
+                self._send_json(payload)
+                return
+
             if parsed.path.startswith("/api/jobs/"):
                 job_id = parsed.path.rsplit("/", 1)[-1]
                 job = jobs.get(job_id)
@@ -879,6 +1100,10 @@ def serve_dashboard(
 
             try:
                 if parsed.path == "/api/run":
+                    run_artifacts_dir = _allocate_run_artifacts_dir(
+                        str(payload.get("artifacts_dir") or root_artifacts_dir),
+                        kind="task-run",
+                    )
                     job_id = jobs.start(
                         "task-run",
                         _run_task_job,
@@ -886,7 +1111,7 @@ def serve_dashboard(
                         template_key=str(payload.get("template_key") or "feature-delivery"),
                         provider=str(payload.get("provider") or "openai"),
                         execution_mode=str(payload.get("execution_mode") or "auto"),
-                        artifacts_dir=str(payload.get("artifacts_dir") or root_artifacts_dir),
+                        artifacts_dir=run_artifacts_dir,
                         model=str(payload.get("model")) if payload.get("model") else None,
                         runtime_adapter=str(payload.get("runtime_adapter")) if payload.get("runtime_adapter") else None,
                         base_url=str(payload.get("base_url")) if payload.get("base_url") else None,
@@ -899,17 +1124,22 @@ def serve_dashboard(
                     config_path_value = str(payload.get("config_path") or "").strip()
                     if not config_path_value:
                         raise ConfigValidationError("config_path is required for /api/run-config.")
+                    requested_dir = str(payload.get("artifacts_dir") or root_artifacts_dir)
                     job_id = jobs.start(
                         "config-run",
                         _run_config_job,
                         config_path=config_path_value,
-                        artifacts_dir=str(payload.get("artifacts_dir")) if payload.get("artifacts_dir") else None,
+                        artifacts_dir=_allocate_run_artifacts_dir(requested_dir, kind="config-run"),
                         scope=str(payload.get("scope")) if payload.get("scope") else None,
                     )
                     self._send_json({"job_id": job_id}, status=HTTPStatus.ACCEPTED)
                     return
 
                 if parsed.path == "/api/pr":
+                    run_artifacts_dir = _allocate_run_artifacts_dir(
+                        str(payload.get("artifacts_dir") or root_artifacts_dir),
+                        kind="pr-review",
+                    )
                     job_id = jobs.start(
                         "pr-review",
                         _run_pr_job,
@@ -920,7 +1150,7 @@ def serve_dashboard(
                         focus=str(payload.get("focus")) if payload.get("focus") else None,
                         provider=str(payload.get("provider") or "openai"),
                         execution_mode=str(payload.get("execution_mode") or "auto"),
-                        artifacts_dir=str(payload.get("artifacts_dir") or root_artifacts_dir),
+                        artifacts_dir=run_artifacts_dir,
                         model=str(payload.get("model")) if payload.get("model") else None,
                         runtime_adapter=str(payload.get("runtime_adapter")) if payload.get("runtime_adapter") else None,
                         base_url=str(payload.get("base_url")) if payload.get("base_url") else None,
