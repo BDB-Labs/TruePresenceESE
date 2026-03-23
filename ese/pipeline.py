@@ -360,7 +360,7 @@ def _is_parallelizable_role(role: str) -> bool:
 def _load_custom_adapter(reference: str) -> RoleAdapter:
     if ":" not in reference:
         raise PipelineError(
-            "runtime.adapter must be one of {'dry-run', 'openai', 'custom_api'} or a Python reference in 'module:function' format",
+            "runtime.adapter must be one of {'dry-run', 'openai', 'local', 'custom_api'} or a Python reference in 'module:function' format",
         )
 
     module_name, object_name = reference.split(":", 1)

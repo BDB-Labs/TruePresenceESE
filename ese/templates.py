@@ -182,13 +182,17 @@ def provider_runtime_summary(provider: str, *, execution_mode: str, runtime_adap
     """Explain the effective runtime posture for a provider and execution mode."""
     clean_provider = (provider or "").strip().lower()
     clean_mode = (execution_mode or AUTO_EXECUTION_MODE).strip().lower() or AUTO_EXECUTION_MODE
+    clean_adapter = (runtime_adapter or "").strip()
     support = PROVIDER_SUPPORT.get(clean_provider, {})
     supports_live = bool(support.get("supports_live"))
+    builtin_runtime_adapters = {"openai", "local", "custom_api"}
     note = ""
     if clean_mode == DEMO_EXECUTION_MODE:
         note = f"{clean_provider} will run in demo mode via dry-run artifacts."
-    elif runtime_adapter:
-        note = f"{clean_provider} will use custom runtime adapter '{runtime_adapter}'."
+    elif clean_adapter in builtin_runtime_adapters:
+        note = f"{clean_provider} uses built-in live adapter '{clean_adapter}'."
+    elif clean_adapter:
+        note = f"{clean_provider} will use custom runtime adapter '{clean_adapter}'."
     elif supports_live:
         note = f"{clean_provider} uses a built-in live adapter."
     else:
@@ -197,7 +201,7 @@ def provider_runtime_summary(provider: str, *, execution_mode: str, runtime_adap
         "provider": clean_provider,
         "supports_builtin_live": supports_live,
         "execution_mode": clean_mode,
-        "runtime_adapter": runtime_adapter,
+        "runtime_adapter": clean_adapter or None,
         "note": note,
     }
 

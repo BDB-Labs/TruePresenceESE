@@ -5,8 +5,11 @@ from pathlib import Path
 import yaml
 
 from ese.init_wizard import (
+    LIVE_EXECUTION_MODE,
     _apply_simple_mode_model_diversity,
     _ensemble_constraints,
+    _provider_default_from_env,
+    _select_execution_mode,
     run_wizard,
 )
 
@@ -57,6 +60,37 @@ def test_simple_mode_model_diversity_overrides_implementer() -> None:
     )
 
     assert cfg["roles"]["implementer"]["model"] != "gpt-5"
+
+
+def test_provider_default_from_env_prefers_local_without_hosted_credentials(monkeypatch) -> None:
+    for env_name in [
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "XAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "HF_TOKEN",
+        "CUSTOM_API_KEY",
+        "LOCAL_MODEL",
+    ]:
+        monkeypatch.delenv(env_name, raising=False)
+
+    assert _provider_default_from_env() == "local"
+
+
+def test_select_execution_mode_defaults_local_to_live(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def _fake_select(message, **kwargs):  # noqa: ANN001
+        captured["default"] = kwargs["default"]
+        return _FakePrompt(kwargs["default"])
+
+    monkeypatch.setattr("ese.init_wizard.questionary.select", _fake_select)
+
+    selected = _select_execution_mode("local", advanced=False)
+
+    assert selected == LIVE_EXECUTION_MODE
+    assert captured["default"] == LIVE_EXECUTION_MODE
 
 
 def test_run_wizard_writes_scope_and_demo_config(tmp_path: Path, monkeypatch) -> None:

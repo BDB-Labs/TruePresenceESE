@@ -207,6 +207,16 @@ def test_pipeline_rejects_non_mapping_roles_configuration(tmp_path: Path) -> Non
     assert "roles must be a mapping of role names to role configs" in str(exc.value)
 
 
+def test_pipeline_invalid_adapter_message_lists_local_builtin(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg["runtime"] = {"adapter": "not-a-reference"}
+
+    with pytest.raises(PipelineError) as exc:
+        run_pipeline(cfg, artifacts_dir=str(tmp_path / "artifacts"))
+
+    assert "{'dry-run', 'openai', 'local', 'custom_api'}" in str(exc.value)
+
+
 def test_documentation_writer_prompt_is_specialized() -> None:
     prompt = _role_prompt(
         role="documentation_writer",

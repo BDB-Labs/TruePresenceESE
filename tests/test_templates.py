@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from ese.templates import build_task_config, recommend_template_for_scope
+from ese.templates import build_task_config, provider_runtime_summary, recommend_template_for_scope
 
 
 def _run(args: list[str], *, cwd: Path) -> None:
@@ -45,6 +45,17 @@ def test_build_task_config_supports_local_live_runs() -> None:
 
     assert cfg["runtime"]["adapter"] == "local"
     assert cfg["runtime"]["local"]["base_url"] == "http://localhost:11434/v1"
+
+
+def test_provider_runtime_summary_labels_builtin_adapters_clearly() -> None:
+    summary = provider_runtime_summary(
+        "local",
+        execution_mode="live",
+        runtime_adapter="local",
+    )
+
+    assert "built-in live adapter 'local'" in summary["note"]
+    assert "custom runtime adapter" not in summary["note"]
 
 
 def test_recommend_template_for_scope_matches_common_intent() -> None:

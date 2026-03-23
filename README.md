@@ -184,6 +184,7 @@ Use `ese roles` to print the role catalog in the CLI.
 ## Provider/model selection and adapters
 
 Wizard provider presets: `openai`, `anthropic`, `google`, `xai`, `openrouter`, `huggingface`, `local`, `custom_api`.
+If no hosted-provider credentials are detected, the wizard now defaults to `local`, and choosing `local` defaults the execution mode to `live`.
 
 Built-in runtime adapters:
 - `dry-run`: deterministic placeholder artifacts, no API calls.

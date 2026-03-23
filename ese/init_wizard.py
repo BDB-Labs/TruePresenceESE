@@ -341,10 +341,17 @@ def _default_api_key_env(provider: str) -> str:
 
 
 def _provider_default_from_env() -> str:
-    detectable_providers = PROVIDER_CHOICES
+    detectable_providers = [
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "openrouter",
+        "huggingface",
+    ]
     configured = [p for p in detectable_providers if os.getenv(_default_api_key_env(p))]
     if not configured:
-        return "openai"
+        return "local"
     if len(configured) == 1:
         return configured[0]
     if "openai" in configured:
@@ -539,7 +546,12 @@ def _select_execution_mode(provider: str, *, advanced: bool) -> str:
             ),
         )
 
-    default_mode = LIVE_EXECUTION_MODE if supports_live and os.getenv(_default_api_key_env(provider)) else DEMO_EXECUTION_MODE
+    if provider == "local":
+        default_mode = LIVE_EXECUTION_MODE
+    elif supports_live and os.getenv(_default_api_key_env(provider)):
+        default_mode = LIVE_EXECUTION_MODE
+    else:
+        default_mode = DEMO_EXECUTION_MODE
     if not supports_live:
         default_mode = DEMO_EXECUTION_MODE
 
