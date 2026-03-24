@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReviewChallenges",
+  "type": "object",
+  "required": ["contradictions", "missed_hazards", "human_review_required"],
+  "properties": {
+    "contradictions": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "missed_hazards": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "human_review_required": {"type": "boolean"}
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DocumentInventory",
+  "type": "object",
+  "required": ["project_id", "documents", "missing_required_documents"],
+  "properties": {
+    "project_id": {"type": "string"},
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["document_id", "filename", "document_type", "required_for_bid_review"],
+        "properties": {
+          "document_id": {"type": "string"},
+          "filename": {"type": "string"},
+          "document_type": {"type": "string"},
+          "required_for_bid_review": {"type": "boolean"}
+        }
+      }
+    },
+    "missing_required_documents": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

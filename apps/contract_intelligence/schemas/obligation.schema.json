@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Obligation",
+  "type": "object",
+  "required": [
+    "id",
+    "source_clause",
+    "title",
+    "obligation_type",
+    "trigger",
+    "due_rule",
+    "owner_role",
+    "severity_if_missed",
+    "evidence"
+  ],
+  "properties": {
+    "id": {"type": "string"},
+    "source_clause": {"type": "string"},
+    "title": {"type": "string"},
+    "obligation_type": {"type": "string"},
+    "trigger": {"type": "string"},
+    "due_rule": {"type": "string"},
+    "owner_role": {"type": "string"},
+    "severity_if_missed": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["document_id", "location"],
+        "properties": {
+          "document_id": {"type": "string"},
+          "location": {"type": "string"},
+          "excerpt": {"type": "string"}
+        }
+      }
+    }
+  }
+}
