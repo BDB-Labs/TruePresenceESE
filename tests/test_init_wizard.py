@@ -101,11 +101,17 @@ def test_run_wizard_writes_scope_and_demo_config(tmp_path: Path, monkeypatch) ->
             "ensemble",
             "anthropic",
             "demo",
+            "framework",
             "balanced",
             "recommended (claude-sonnet-4)",
         ],
         texts=[
             "Document the deployment workflow for the new auth system",
+            "2",
+            "workflow_architect",
+            "Design the deployment workflow and produce the implementation plan and checklist.",
+            "release_reviewer",
+            "Review rollback evidence and release risks using the plan, checklist, and deployment docs.",
         ],
         confirms=[True, True, True],
     )
@@ -113,9 +119,12 @@ def test_run_wizard_writes_scope_and_demo_config(tmp_path: Path, monkeypatch) ->
     written = run_wizard(str(config_path), advanced=False)
 
     assert written == str(config_path)
-    contents = config_path.read_text(encoding="utf-8")
-    assert "scope: Document the deployment workflow for the new auth system" in contents
-    assert "adapter: dry-run" in contents
+    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert cfg["input"]["scope"] == "Document the deployment workflow for the new auth system"
+    assert cfg["runtime"]["adapter"] == "dry-run"
+    assert cfg["install_profile"]["kind"] == "framework"
+    assert cfg["role_order"] == ["workflow_architect", "release_reviewer"]
+    assert "Primary responsibility:" in cfg["roles"]["workflow_architect"]["prompt"]
 
 
 def test_run_wizard_rejects_invalid_custom_adapter_before_write(tmp_path: Path, monkeypatch) -> None:
@@ -126,17 +135,20 @@ def test_run_wizard_rejects_invalid_custom_adapter_before_write(tmp_path: Path, 
             "ensemble",
             "openai",
             "custom_module",
+            "framework",
             "fast",
             "recommended (gpt-5-mini)",
         ],
         texts=[
             "Ship a demo safely",
+            "2",
+            "delivery_planner",
+            "Plan the delivery sequence and produce the rollout checklist and handoff notes.",
+            "risk_reviewer",
+            "Review rollout risks, rollback evidence, and release blockers using the checklist and notes.",
             "invalid-adapter",
         ],
         confirms=[False, True, True, False],
-        checkboxes=[
-            ["architect", "implementer"],
-        ],
     )
 
     written = run_wizard(str(config_path), advanced=True)
@@ -153,6 +165,7 @@ def test_run_wizard_advanced_supports_per_role_model_overrides(tmp_path: Path, m
             "ensemble",
             "openai",
             "demo",
+            "framework",
             "fast",
             "recommended (gpt-5-mini)",
             "inherit global default (gpt-5-mini)",
@@ -161,11 +174,13 @@ def test_run_wizard_advanced_supports_per_role_model_overrides(tmp_path: Path, m
         ],
         texts=[
             "Harden the release checklist for a staged rollout",
+            "2",
+            "design_critic",
+            "Review the rollout design and produce implementation guidance with clear handoff boundaries.",
+            "verification_lead",
+            "Validate rollout risks and tests using the guidance, release notes, and deployment checklist.",
         ],
         confirms=[True, True, True, True],
-        checkboxes=[
-            ["architect", "implementer"],
-        ],
     )
 
     written = run_wizard(str(config_path), advanced=True)
@@ -173,5 +188,34 @@ def test_run_wizard_advanced_supports_per_role_model_overrides(tmp_path: Path, m
     assert written == str(config_path)
     cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert cfg["provider"]["model"] == "gpt-5-mini"
-    assert cfg["roles"]["architect"].get("model") is None
-    assert cfg["roles"]["implementer"]["model"] == "gpt-5"
+    assert cfg["roles"]["design_critic"].get("model") is None
+    assert cfg["roles"]["verification_lead"]["model"] == "gpt-5"
+    assert cfg["install_profile"]["kind"] == "framework"
+
+
+def test_run_wizard_pack_config_uses_fixed_pack_roles(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "ese.config.yaml"
+    _patch_questionary(
+        monkeypatch,
+        selects=[
+            "ensemble",
+            "openai",
+            "demo",
+            "pack",
+            "construction-contract-intelligence",
+            "recommended (gpt-5)",
+        ],
+        texts=[
+            "Review the Riverside Bridge bid package before deciding whether to pursue it",
+        ],
+        confirms=[True, True, True],
+    )
+
+    written = run_wizard(str(config_path), advanced=False)
+
+    assert written == str(config_path)
+    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert cfg["install_profile"]["kind"] == "pack"
+    assert cfg["install_profile"]["pack"] == "construction-contract-intelligence"
+    assert cfg["role_order"][0] == "document_intake_analyst"
+    assert "bid_decision_analyst" in cfg["roles"]

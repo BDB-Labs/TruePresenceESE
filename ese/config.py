@@ -233,6 +233,7 @@ class ESEConfig(BaseModel):
     mode: Literal["ensemble", "solo"] = "ensemble"
     provider: ProviderConfig
     roles: dict[str, RoleConfig] = Field(default_factory=dict)
+    role_order: list[str] | None = None
     constraints: ConstraintsConfig = Field(default_factory=ConstraintsConfig)
     input: InputConfig = Field(default_factory=InputConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
@@ -263,6 +264,26 @@ class ESEConfig(BaseModel):
             raise ValueError("must include at least one configured role")
         return value
 
+    @field_validator("role_order")
+    @classmethod
+    def _validate_role_order_shape(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
+
+        cleaned_roles: list[str] = []
+        seen: set[str] = set()
+        for role in value:
+            if not isinstance(role, str):
+                raise ValueError("role_order entries must be strings")
+            cleaned = role.strip()
+            if not cleaned:
+                raise ValueError("role_order entries must be non-empty strings")
+            if cleaned in seen:
+                raise ValueError(f"role_order contains duplicate role '{cleaned}'")
+            seen.add(cleaned)
+            cleaned_roles.append(cleaned)
+        return cleaned_roles
+
     @model_validator(mode="after")
     def _validate_adapter_contract(self) -> "ESEConfig":
         adapter = self.runtime.adapter.strip().lower()
@@ -276,6 +297,17 @@ class ESEConfig(BaseModel):
             raise ValueError(
                 "gating.fail_on_high requires output.enforce_json for deterministic severity parsing",
             )
+
+        if self.role_order is not None:
+            configured_roles = list(self.roles.keys())
+            unknown_roles = [role for role in self.role_order if role not in self.roles]
+            if unknown_roles:
+                details = ", ".join(unknown_roles)
+                raise ValueError(f"role_order references unknown configured roles: {details}")
+            missing_roles = [role for role in configured_roles if role not in self.role_order]
+            if missing_roles:
+                details = ", ".join(missing_roles)
+                raise ValueError(f"role_order omits configured roles: {details}")
 
         if adapter == "openai":
             if provider_name != "openai":

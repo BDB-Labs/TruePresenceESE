@@ -8,7 +8,8 @@ After `ese start`, ESE writes:
 ## Deterministic role ordering
 
 Execution order is deterministic:
-1. Built-in roles follow fixed order when present:
+1. If `role_order` is configured, ESE uses that order exactly.
+2. Otherwise, built-in roles follow fixed order when present:
    - `architect`
    - `implementer`
    - `adversarial_reviewer`
@@ -19,7 +20,7 @@ Execution order is deterministic:
    - `devops_sre`
    - `database_engineer`
    - `release_manager`
-2. Any custom roles run after built-ins in the order they appear in `roles`.
+3. Any custom roles run after built-ins in the order they appear in `roles`.
 
 ## Context chaining contract
 

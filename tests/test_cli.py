@@ -48,6 +48,13 @@ def test_roles_command_lists_known_role() -> None:
     assert "architect" in result.stdout
 
 
+def test_packs_command_lists_construction_pack() -> None:
+    result = runner.invoke(app, ["packs"])
+
+    assert result.exit_code == 0
+    assert "construction-contract-intelligence" in result.stdout
+
+
 def test_no_args_launches_dashboard(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 

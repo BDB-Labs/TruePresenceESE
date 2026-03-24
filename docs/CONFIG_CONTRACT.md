@@ -10,6 +10,7 @@
 | `mode` | enum | yes | `ensemble` or `solo`. |
 | `provider` | object | yes | Global provider/model defaults. |
 | `roles` | map | yes | Role-specific overrides and metadata. Must contain at least one configured role. |
+| `role_order` | list[string] | no | Explicit execution order. When set, it must contain every configured role exactly once. |
 | `constraints` | object | no | Ensemble separation checks (for doctor). |
 | `input` | object | no | Human scope/prompt for the run. Required at execution time. |
 | `output` | object | no | Artifact/output behavior flags. |
@@ -99,3 +100,8 @@ When `runtime.adapter=custom_api`:
 
 Validation is performed by `ese.config.validate_config` (Pydantic-backed).
 Invalid configs fail fast with field-level errors surfaced by `ese doctor` and `ese start`.
+
+## Framework vs pack installs
+
+- Framework-mode configs typically set `role_order`, custom role keys, `roles.<role>.responsibility`, and starter `roles.<role>.prompt` text.
+- Pack-mode configs use the same schema, but the role catalog and role order come from the selected pack rather than from the installer.

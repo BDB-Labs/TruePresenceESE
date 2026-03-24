@@ -8,6 +8,7 @@ import typer
 import yaml
 
 from ese.config import ConfigValidationError, load_config, write_config
+from ese.config_packs import list_config_packs
 from ese.dashboard import serve_dashboard
 from ese.doctor import build_doctor_guidance, evaluate_doctor, run_doctor
 from ese.feedback import record_feedback as persist_feedback
@@ -194,10 +195,18 @@ def init(
 
 @app.command("roles")
 def list_roles():
-    """List selectable ESE roles and their responsibilities."""
-    typer.echo("Selectable ESE roles:")
+    """List starter framework role examples and their responsibilities."""
+    typer.echo("Built-in starter role examples for framework installs:")
     for role, description in ROLE_DESCRIPTIONS.items():
         typer.echo(f"  - {role}: {description}")
+
+
+@app.command("packs")
+def list_packs():
+    """List shipped config packs with fixed role catalogs."""
+    typer.echo("Shipped config packs:")
+    for pack in list_config_packs():
+        typer.echo(f"  - {pack.key}: {pack.title} - {pack.summary}")
 
 
 @app.command()

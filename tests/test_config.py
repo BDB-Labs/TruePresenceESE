@@ -161,3 +161,22 @@ def test_validate_config_accepts_local_adapter() -> None:
 
     assert validated["runtime"]["adapter"] == "local"
     assert validated["runtime"]["local"]["base_url"] == "http://localhost:11434/v1"
+
+
+def test_validate_config_accepts_explicit_role_order() -> None:
+    cfg = _base_cfg()
+    cfg["role_order"] = ["implementer", "architect"]
+
+    validated = validate_config(cfg, source="test.yaml")
+
+    assert validated["role_order"] == ["implementer", "architect"]
+
+
+def test_validate_config_rejects_role_order_unknown_role() -> None:
+    cfg = _base_cfg()
+    cfg["role_order"] = ["architect", "unknown_role"]
+
+    with pytest.raises(ConfigValidationError) as exc:
+        validate_config(cfg, source="test.yaml")
+
+    assert "role_order references unknown configured roles" in str(exc.value)

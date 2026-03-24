@@ -1,6 +1,6 @@
 # Ensemble Software Engineering (ESE)
 
-ESE is a lightweight CLI framework for AI-assisted software development using specialized model roles and explicit ensemble constraints.
+ESE is a lightweight CLI framework for orchestrated AI ensembles. The core engine stays generic, while config packs can ship fixed role catalogs for specific domains.
 
 ## Core pipeline
 
@@ -85,9 +85,11 @@ ese init --advanced
 
 The wizard now asks for:
 - a real project scope/task,
+- whether you are creating a `framework` config or using a fixed `pack`,
 - whether this should be a `demo` config (`dry-run`, no API calls) or a `live` config,
 - provider/model defaults appropriate for that choice,
-- selected roles and optional per-role model overrides in advanced mode.
+- either custom framework roles with starter prompt suggestions and overlap warnings, or a fixed pack-defined role set,
+- optional per-role model overrides in advanced mode.
 
 2. Validate configuration and ensemble constraints:
 
@@ -166,9 +168,10 @@ ese dashboard --artifacts-dir artifacts
 
 The dashboard now supports both task-first runs and PR review runs.
 
-## Role catalog
+## Framework role drafting
 
-Use `ese roles` to print the role catalog in the CLI.
+Use `ese roles` to print the built-in starter role examples for framework installs.
+Use `ese packs` to list shipped config packs with fixed role catalogs.
 
 - `architect`: System design, decomposition, and interface contracts.
 - `implementer`: Code changes and refactors.
@@ -180,6 +183,8 @@ Use `ese roles` to print the role catalog in the CLI.
 - `devops_sre`: CI/CD, deploy safety, and observability.
 - `database_engineer`: Schema/index/migration correctness.
 - `release_manager`: Go/no-go risk assessment and rollout checks.
+
+Framework installs are not limited to those names. The wizard can now generate starter prompts for user-defined roles and warn when responsibilities overlap enough to weaken ensemble independence.
 
 ## Provider/model selection and adapters
 

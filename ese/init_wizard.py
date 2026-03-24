@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 import questionary
 
+from ese.config_packs import ConfigPackDefinition, get_config_pack, list_config_packs
 from ese.config import ConfigValidationError, resolve_role_model, validate_config, write_config
 from ese.provider_runtime import (
     PROVIDER_CHOICES,
@@ -15,10 +16,13 @@ from ese.provider_runtime import (
     default_provider_from_env as _provider_default_from_env,
     provider_runtime_capability,
 )
+from ese.role_drafting import FrameworkRoleInput, draft_framework_roles, normalize_role_key
 
 DEMO_EXECUTION_MODE = "demo"
 LIVE_EXECUTION_MODE = "live"
 CUSTOM_MODULE_EXECUTION_MODE = "custom_module"
+FRAMEWORK_CONFIG_TYPE = "framework"
+PACK_CONFIG_TYPE = "pack"
 
 GOAL_PROFILES = [
     "fast",
@@ -294,6 +298,16 @@ def _validate_non_empty_text(label: str):
     return _validator
 
 
+def _validate_positive_int_text(label: str):
+    def _validator(value: str | None) -> bool | str:
+        raw = (value or "").strip()
+        if raw.isdigit() and int(raw) > 0:
+            return True
+        return f"{label} must be a positive integer."
+
+    return _validator
+
+
 def _validate_adapter_reference(value: str | None) -> bool | str:
     raw = (value or "").strip()
     module_name, separator, object_name = raw.partition(":")
@@ -513,9 +527,40 @@ def _ordered_selected_roles(selected_roles: list[str]) -> list[str]:
     return [role for role in ROLE_DESCRIPTIONS if role in selected]
 
 
+def _config_type_choices() -> list[questionary.Choice]:
+    return [
+        questionary.Choice(
+            title="framework - define your own role names and responsibilities",
+            value=FRAMEWORK_CONFIG_TYPE,
+        ),
+        questionary.Choice(
+            title="pack - use a shipped config pack with fixed roles",
+            value=PACK_CONFIG_TYPE,
+        ),
+    ]
+
+
+def _pack_choices() -> list[questionary.Choice]:
+    return [
+        questionary.Choice(title=f"{pack.title} - {pack.summary}", value=pack.key)
+        for pack in list_config_packs()
+    ]
+
+
 def _roles_for_preset(preset: str, selected_roles: list[str]) -> Dict[str, Dict[str, Any]]:
     defaults = ROLE_DEFAULTS_BY_PRESET.get(preset, {})
     return {role: dict(defaults.get(role, {"temperature": 0.2})) for role in selected_roles}
+
+
+def _build_pack_roles_cfg(pack: ConfigPackDefinition) -> Dict[str, Dict[str, Any]]:
+    return {
+        role.key: {
+            "temperature": role.temperature,
+            "responsibility": role.responsibility,
+            "prompt": role.prompt,
+        }
+        for role in pack.roles
+    }
 
 
 def _ensemble_constraints(selected_roles: list[str]) -> Dict[str, Any]:
@@ -533,6 +578,7 @@ def _preview_config(cfg: Dict[str, Any]) -> None:
     role_models = {role: resolve_role_model(cfg, role) for role in roles}
     pairs = (cfg.get("constraints") or {}).get("disallow_same_model_pairs") or []
     scope = ((cfg.get("input") or {}).get("scope") or "").strip()
+    install_profile = cfg.get("install_profile") or {}
 
     violations: list[str] = []
     for left, right in pairs:
@@ -544,11 +590,14 @@ def _preview_config(cfg: Dict[str, Any]) -> None:
         "Configuration preview:",
         f"  mode: {cfg.get('mode')}",
         f"  scope: {scope}",
+        f"  install_profile: {install_profile.get('kind', 'framework')}",
         f"  provider: {(cfg.get('provider') or {}).get('name')} / {(cfg.get('provider') or {}).get('model')}",
         f"  runtime.adapter: {(cfg.get('runtime') or {}).get('adapter')}",
         f"  output.artifacts_dir: {(cfg.get('output') or {}).get('artifacts_dir')}",
         "  role models:",
     ]
+    if install_profile.get("pack"):
+        lines.insert(4, f"  pack: {install_profile.get('pack')}")
     lines.extend(f"    - {role}: {model}" for role, model in role_models.items())
     if violations:
         lines.append("  doctor risk flags:")
@@ -557,6 +606,76 @@ def _preview_config(cfg: Dict[str, Any]) -> None:
         lines.append("  doctor risk flags: none")
 
     questionary.print("\n".join(lines))
+
+
+def _render_framework_role_review(
+    *,
+    drafts,
+    overlap_warnings: list[str],
+) -> None:
+    lines = ["", "Framework role review:"]
+    for draft in drafts:
+        lines.append(f"  - {draft.name} -> {draft.key}")
+        lines.append(f"    responsibility: {draft.responsibility}")
+        if draft.warnings:
+            lines.extend(f"    warning: {item}" for item in draft.warnings)
+        if draft.suggestions:
+            lines.extend(f"    suggestion: {item}" for item in draft.suggestions)
+    if overlap_warnings:
+        lines.append("  overlap warnings:")
+        lines.extend(f"    - {item}" for item in overlap_warnings)
+    else:
+        lines.append("  overlap warnings: none")
+    questionary.print("\n".join(lines))
+
+
+def _collect_framework_roles(*, scope: str) -> tuple[Dict[str, Dict[str, Any]], list[str]]:
+    role_count = int(
+        questionary.text(
+            "How many ensemble members should this framework config start with?",
+            default="3",
+            validate=_validate_positive_int_text("Role count"),
+        ).ask(),
+    )
+
+    role_inputs: list[FrameworkRoleInput] = []
+    for index in range(role_count):
+        role_number = index + 1
+        role_name = questionary.text(
+            f"Role {role_number} name:",
+            validate=_validate_non_empty_text(f"Role {role_number} name"),
+        ).ask()
+        responsibility = questionary.text(
+            f"What does '{role_name}' own?",
+            validate=_validate_non_empty_text(f"Responsibility for {role_name}"),
+        ).ask()
+        role_inputs.append(
+            FrameworkRoleInput(
+                name=role_name,
+                responsibility=responsibility,
+            ),
+        )
+
+    review = draft_framework_roles(scope=scope, roles=role_inputs)
+    _render_framework_role_review(
+        drafts=list(review.drafts),
+        overlap_warnings=list(review.overlap_warnings),
+    )
+
+    roles_cfg: Dict[str, Dict[str, Any]] = {}
+    role_order: list[str] = []
+    for draft in review.drafts:
+        role_order.append(draft.key)
+        role_cfg: Dict[str, Any] = {
+            "temperature": 0.2,
+            "responsibility": draft.responsibility,
+            "prompt": draft.prompt,
+            "display_name": draft.name,
+        }
+        if normalize_role_key(draft.name) != draft.key:
+            role_cfg["normalized_from"] = draft.name
+        roles_cfg[draft.key] = role_cfg
+    return roles_cfg, role_order
 
 
 def _apply_simple_mode_model_diversity(
@@ -594,6 +713,11 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
             default=_provider_default_from_env(),
         ).ask()
         execution_mode = _select_execution_mode(provider, advanced=advanced)
+        config_type = questionary.select(
+            "Configuration source:",
+            choices=_config_type_choices(),
+            default=FRAMEWORK_CONFIG_TYPE,
+        ).ask()
 
         provider_name = provider
         provider_cfg: Dict[str, Any] = {}
@@ -604,20 +728,23 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
                 validate=_validate_non_empty_text("Provider name"),
             ).ask()
 
+        selected_pack: ConfigPackDefinition | None = None
         goal_profile = None
-        selected_roles: list[str]
         preset: str
-        if advanced:
+        if config_type == PACK_CONFIG_TYPE:
+            selected_pack = get_config_pack(
+                questionary.select(
+                    "Installed pack:",
+                    choices=_pack_choices(),
+                ).ask(),
+            )
+            goal_profile = selected_pack.goal_profile
+            preset = selected_pack.preset
+        elif advanced:
             preset = questionary.select(
                 "Preset:", choices=["fast", "balanced", "strict", "paranoid"],
             ).ask()
             goal_profile = PRESET_TO_GOAL_PROFILE.get(preset)
-            selected_roles = questionary.checkbox(
-                "Select roles for this pipeline (each option includes its responsibility):",
-                choices=_role_choices(),
-                validate=lambda value: bool(value) or "Select at least one role.",
-            ).ask()
-            selected_roles = _ordered_selected_roles(selected_roles or DEFAULT_SELECTED_ROLES)
         else:
             goal_profile = questionary.select(
                 "Goal profile:",
@@ -625,14 +752,23 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
                 default="balanced",
             ).ask()
             preset = GOAL_TO_PRESET[goal_profile]
-            selected_roles = GOAL_DEFAULT_ROLES[goal_profile]
 
         scope = questionary.text(
             "Project scope or task for this ensemble run:",
             validate=_validate_non_empty_text("Project scope"),
         ).ask()
         model = _select_default_model(provider=provider, goal_profile=goal_profile)
-        roles_cfg = _roles_for_preset(preset=preset, selected_roles=selected_roles)
+
+        selected_roles: list[str]
+        role_order: list[str]
+        if selected_pack is not None:
+            roles_cfg = _build_pack_roles_cfg(selected_pack)
+            selected_roles = [role.key for role in selected_pack.roles]
+            role_order = list(selected_roles)
+        else:
+            roles_cfg, role_order = _collect_framework_roles(scope=scope)
+            selected_roles = list(role_order)
+
         if advanced:
             _apply_advanced_role_model_overrides(
                 roles_cfg,
@@ -687,6 +823,7 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
                 **provider_cfg,
             },
             "preset": preset,
+            "role_order": role_order,
             "roles": roles_cfg,
             "input": {
                 "scope": scope.strip(),
@@ -704,7 +841,12 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
                 "max_retries": 2,
                 "retry_backoff_seconds": 1.0,
             },
+            "install_profile": {
+                "kind": config_type,
+            },
         }
+        if selected_pack is not None:
+            cfg["install_profile"]["pack"] = selected_pack.key
         if api_key_env:
             cfg["provider"]["api_key_env"] = api_key_env
 
