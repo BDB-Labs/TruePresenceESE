@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Mapping, Protocol
 import yaml
 
 from ese.adapters import AdapterExecutionError, BUILTIN_ADAPTERS
-from ese.config import resolve_prompt_text, resolve_role_model, resolve_scope_text
+from ese.config import resolve_prompt_text, resolve_role_model, resolve_role_prompt_text, resolve_scope_text
 from ese.feedback import feedback_prompt_guidance
 from ese.provider_runtime import BUILTIN_RUNTIME_ADAPTERS_TEXT
 
@@ -137,6 +137,30 @@ def _normalize_role_order(cfg: Dict[str, Any]) -> list[str]:
     if not configured_roles:
         return []
 
+    explicit_role_order = cfg.get("role_order")
+    if explicit_role_order is not None:
+        if not isinstance(explicit_role_order, list):
+            raise PipelineError("role_order must be a list of configured role names")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for role in explicit_role_order:
+            if not isinstance(role, str) or not role.strip():
+                raise PipelineError("role_order entries must be non-empty strings")
+            clean_role = role.strip()
+            if clean_role not in roles_cfg:
+                raise PipelineError(f"role_order references unknown role '{clean_role}'")
+            if clean_role in seen:
+                raise PipelineError(f"role_order contains duplicate role '{clean_role}'")
+            normalized.append(clean_role)
+            seen.add(clean_role)
+
+        missing_roles = [role for role in configured_roles if role not in seen]
+        if missing_roles:
+            details = ", ".join(missing_roles)
+            raise PipelineError(f"role_order omits configured roles: {details}")
+        return normalized
+
     ordered: list[str] = [role for role in PIPELINE_ORDER if role in configured_roles]
     ordered.extend(role for role in configured_roles if role not in ordered)
     return ordered
@@ -239,6 +263,7 @@ def _role_prompt(
     *,
     additional_context: str = "",
     enforce_json: bool,
+    role_prompt_text: str = "",
 ) -> str:
     architect_output = outputs.get("architect", "").strip()
     implementer_output = outputs.get("implementer", "").strip()
@@ -254,6 +279,32 @@ def _role_prompt(
     extra_context_block = ""
     if additional_context.strip():
         extra_context_block = f"\n\nAdditional Run Context:\n{additional_context.strip()}"
+
+    custom_prompt = role_prompt_text.strip()
+    if custom_prompt:
+        upstream_sections = [
+            f"Upstream output from {name}:\n{text.strip()}"
+            for name, text in outputs.items()
+            if isinstance(text, str) and text.strip()
+        ]
+        upstream_text = "\n\n".join(upstream_sections)
+        prompt = textwrap.dedent(
+            f"""
+            {custom_prompt}
+
+            Scope:
+            {scope}
+
+            {extra_context_block}
+
+            {upstream_text}
+
+            {artifact_guidance}
+
+            {json_contract}
+            """,
+        ).strip()
+        return _compact_lines(prompt)
 
     if role == "architect":
         prompt = textwrap.dedent(
@@ -337,9 +388,16 @@ def _role_context(role: str, outputs: Mapping[str, str]) -> Dict[str, str]:
         return {}
     if role == "implementer":
         return {"architect": outputs.get("architect", "")}
-    return {
+    default_context = {
         "implementer": outputs.get("implementer", ""),
         "architect": outputs.get("architect", ""),
+    }
+    if any(value for value in default_context.values()):
+        return default_context
+    return {
+        name: text
+        for name, text in outputs.items()
+        if isinstance(text, str) and text.strip()
     }
 
 
@@ -675,6 +733,7 @@ def _execute_role(
         outputs=outputs,
         additional_context=additional_context,
         enforce_json=enforce_json,
+        role_prompt_text=resolve_role_prompt_text(cfg, role),
     )
     context = _role_context(role=role, outputs=outputs)
     output = _invoke_adapter(

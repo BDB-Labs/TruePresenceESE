@@ -60,6 +60,37 @@ def test_pipeline_context_chaining_visible_in_dry_run_outputs(tmp_path: Path) ->
     assert reviewer_output["metadata"]["context_keys"] == ["architect", "implementer"]
 
 
+def test_pipeline_uses_role_prompt_override_for_custom_roles(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg["roles"] = {
+        "custom_role": {
+            "prompt": "Use findings for contract issues, not software defects.",
+        },
+    }
+    cfg["gating"] = {"fail_on_high": False}
+    artifacts_dir = tmp_path / "artifacts"
+
+    run_pipeline(cfg, artifacts_dir=str(artifacts_dir))
+
+    custom_output = json.loads((artifacts_dir / "01_custom_role.json").read_text(encoding="utf-8"))
+    assert "Use findings for contract issues, not software defects." in custom_output["metadata"]["prompt_excerpt"]
+
+
+def test_pipeline_custom_roles_receive_prior_outputs_as_context(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg["roles"] = {
+        "document_intake_analyst": {"prompt": "First custom domain role."},
+        "contract_risk_analyst": {"prompt": "Second custom domain role."},
+    }
+    cfg["gating"] = {"fail_on_high": False}
+    artifacts_dir = tmp_path / "artifacts"
+
+    run_pipeline(cfg, artifacts_dir=str(artifacts_dir))
+
+    second_output = json.loads((artifacts_dir / "02_contract_risk_analyst.json").read_text(encoding="utf-8"))
+    assert second_output["metadata"]["context_keys"] == ["document_intake_analyst"]
+
+
 def test_pipeline_orders_custom_roles_after_builtin_order(tmp_path: Path) -> None:
     cfg = _cfg()
     cfg["roles"] = {
@@ -74,6 +105,28 @@ def test_pipeline_orders_custom_roles_after_builtin_order(tmp_path: Path) -> Non
     state = json.loads((artifacts_dir / "pipeline_state.json").read_text(encoding="utf-8"))
     executed_roles = [item["role"] for item in state["execution"]]
     assert executed_roles == ["architect", "implementer", "custom_role"]
+
+
+def test_pipeline_honors_explicit_role_order_for_domain_packs(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg["roles"] = {
+        "document_intake_analyst": {"prompt": "Intake."},
+        "contract_risk_analyst": {"prompt": "Risk."},
+        "adversarial_reviewer": {"prompt": "Challenge."},
+    }
+    cfg["role_order"] = [
+        "document_intake_analyst",
+        "contract_risk_analyst",
+        "adversarial_reviewer",
+    ]
+    cfg["gating"] = {"fail_on_high": False}
+    artifacts_dir = tmp_path / "artifacts"
+
+    run_pipeline(cfg, artifacts_dir=str(artifacts_dir))
+
+    state = json.loads((artifacts_dir / "pipeline_state.json").read_text(encoding="utf-8"))
+    executed_roles = [item["role"] for item in state["execution"]]
+    assert executed_roles == cfg["role_order"]
 
 
 def test_pipeline_uses_configured_artifacts_dir_when_not_overridden(tmp_path: Path) -> None:

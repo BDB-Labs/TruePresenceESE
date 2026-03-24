@@ -431,3 +431,17 @@ def resolve_prompt_text(cfg: Dict[str, Any]) -> str:
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()
     return ""
+
+
+def resolve_role_prompt_text(cfg: Dict[str, Any], role: str) -> str:
+    """Resolve role-specific prompt text from the config when provided."""
+    roles_cfg = cfg.get("roles") or {}
+    if not isinstance(roles_cfg, dict):
+        return ""
+    role_cfg = roles_cfg.get(role) or {}
+    if not isinstance(role_cfg, dict):
+        return ""
+    candidate = role_cfg.get("prompt")
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate.strip()
+    return ""

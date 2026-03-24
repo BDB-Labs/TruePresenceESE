@@ -32,6 +32,12 @@ Or send artifacts somewhere specific:
 python -m apps.contract_intelligence bid-review ./sample_project --artifacts-dir ./tmp/bid_review
 ```
 
+Run the same project through ESE's real orchestration path:
+
+```bash
+python -m apps.contract_intelligence ensemble-bid-review ./sample_project
+```
+
 Run the starter gold corpus:
 
 ```bash
