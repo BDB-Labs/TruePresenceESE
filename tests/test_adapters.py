@@ -200,3 +200,46 @@ def test_local_adapter_wraps_local_runtime_errors(monkeypatch: pytest.MonkeyPatc
         )
 
     assert "Ollama is unavailable" in str(exc.value)
+
+
+def test_local_adapter_can_disable_openai_compat_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = {
+        "provider": {
+            "name": "local",
+            "model": "qwen2.5-coder:14b",
+            "base_url": "http://localhost:11434/v1",
+        },
+        "roles": {
+            "architect": {},
+        },
+        "runtime": {
+            "adapter": "local",
+            "timeout_seconds": 30,
+            "max_retries": 0,
+            "retry_backoff_seconds": 0.1,
+            "local": {
+                "base_url": "http://localhost:11434/v1",
+                "use_openai_compat_auth": False,
+            },
+        },
+    }
+
+    monkeypatch.setattr("ese.adapters.ensure_local_runtime_ready", lambda cfg, auto_start=True, require_models=True: None)
+
+    def _fake_urlopen(request, timeout):  # noqa: ANN001
+        assert timeout == 30
+        assert request.full_url == "http://localhost:11434/v1/responses"
+        assert request.headers.get("Authorization") is None
+        return _FakeResponse(json.dumps({"output_text": "local ok"}))
+
+    monkeypatch.setattr("ese.adapters.urllib.request.urlopen", _fake_urlopen)
+
+    output = local_adapter(
+        role="architect",
+        model="local:qwen2.5-coder:14b",
+        prompt="test prompt",
+        context={},
+        cfg=cfg,
+    )
+
+    assert output == "local ok"

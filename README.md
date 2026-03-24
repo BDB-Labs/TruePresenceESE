@@ -201,6 +201,22 @@ When `output.enforce_json: true`, adapters must return valid JSON role reports a
 - `live`: uses the built-in runtime for `openai`, `local` (Ollama), and `custom_api`.
 - Other providers remain available for model selection in the wizard, but live execution requires an explicit `module:function` adapter in advanced mode.
 
+### Local runtime example
+
+```yaml
+provider:
+  name: local
+  model: qwen2.5-coder:14b
+runtime:
+  adapter: local
+  timeout_seconds: 60
+  max_retries: 2
+  retry_backoff_seconds: 1.0
+  local:
+    base_url: http://localhost:11434/v1
+    use_openai_compat_auth: true
+```
+
 ### OpenAI runtime example
 
 ```yaml
