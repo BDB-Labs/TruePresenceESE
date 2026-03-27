@@ -3,7 +3,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from ese.templates import build_task_config, provider_runtime_summary, recommend_template_for_scope
+from ese.templates import (
+    build_task_config,
+    provider_runtime_summary,
+    recommend_template_for_scope,
+)
 
 
 def _run(args: list[str], *, cwd: Path) -> None:

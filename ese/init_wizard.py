@@ -7,16 +7,29 @@ from typing import Any, Dict
 
 import questionary
 
+from ese.config import (
+    ConfigValidationError,
+    resolve_role_model,
+    validate_config,
+    write_config,
+)
 from ese.config_packs import ConfigPackDefinition, get_config_pack, list_config_packs
-from ese.config import ConfigValidationError, resolve_role_model, validate_config, write_config
 from ese.provider_runtime import (
     PROVIDER_CHOICES,
     builtin_runtime_adapter,
-    default_api_key_env as _default_api_key_env,
-    default_provider_from_env as _provider_default_from_env,
     provider_runtime_capability,
 )
-from ese.role_drafting import FrameworkRoleInput, draft_framework_roles, normalize_role_key
+from ese.provider_runtime import (
+    default_api_key_env as _default_api_key_env,
+)
+from ese.provider_runtime import (
+    default_provider_from_env as _provider_default_from_env,
+)
+from ese.role_drafting import (
+    FrameworkRoleInput,
+    draft_framework_roles,
+    normalize_role_key,
+)
 
 DEMO_EXECUTION_MODE = "demo"
 LIVE_EXECUTION_MODE = "live"
@@ -222,6 +235,7 @@ DEFAULT_DISALLOW_SAME_MODEL_PAIRS = [
     ("architect", "implementer"),
     ("implementer", "adversarial_reviewer"),
     ("implementer", "security_auditor"),
+    ("adversarial_reviewer", "security_auditor"),
     ("implementer", "release_manager"),
 ]
 
@@ -684,9 +698,6 @@ def _apply_simple_mode_model_diversity(
     provider: str,
     selected_roles: list[str],
 ) -> None:
-    if "implementer" not in selected_roles:
-        return
-
     common_models = COMMON_MODELS_BY_PROVIDER.get(provider, [])
     if len(common_models) < 2:
         return
@@ -698,9 +709,34 @@ def _apply_simple_mode_model_diversity(
         return
 
     roles_cfg = cfg.get("roles") or {}
-    implementer_cfg = roles_cfg.get("implementer") or {}
-    implementer_cfg["model"] = alternatives[0]
-    roles_cfg["implementer"] = implementer_cfg
+    if not isinstance(roles_cfg, dict):
+        return
+
+    assigned_models: dict[str, str] = {
+        role: str((role_cfg or {}).get("model") or base_model)
+        for role, role_cfg in roles_cfg.items()
+    }
+
+    def assign_distinct(role: str, *, disallow_with: list[str]) -> None:
+        if role not in selected_roles:
+            return
+        banned = {
+            assigned_models.get(other)
+            for other in disallow_with
+            if assigned_models.get(other)
+        }
+        for candidate in alternatives:
+            if candidate not in banned:
+                role_cfg = roles_cfg.get(role) or {}
+                role_cfg["model"] = candidate
+                roles_cfg[role] = role_cfg
+                assigned_models[role] = candidate
+                return
+
+    assign_distinct("implementer", disallow_with=["architect"])
+    assign_distinct("adversarial_reviewer", disallow_with=["implementer", "security_auditor"])
+    assign_distinct("security_auditor", disallow_with=["implementer", "adversarial_reviewer"])
+    assign_distinct("release_manager", disallow_with=["implementer"])
     cfg["roles"] = roles_cfg
 
 

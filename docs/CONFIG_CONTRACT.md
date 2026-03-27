@@ -1,18 +1,19 @@
 # ESE Config Contract (v1)
 
-`ese.config.yaml` is schema-validated before doctor/pipeline execution.
+`ese.config.yaml` is schema-validated before doctor or pipeline execution.
 
 ## Top-level keys
 
 | Key | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `version` | int | yes | Must be `1` for current contract. |
+| `version` | int | yes | Must be `1`. |
 | `mode` | enum | yes | `ensemble` or `solo`. |
+| `strict_config` | bool | no | When `true`, reject unknown top-level keys and unknown per-role keys outside `provider`, `model`, `temperature`, and `prompt`. |
 | `provider` | object | yes | Global provider/model defaults. |
-| `roles` | map | yes | Role-specific overrides and metadata. Must contain at least one configured role. |
-| `role_order` | list[string] | no | Explicit execution order. When set, it must contain every configured role exactly once. |
-| `constraints` | object | no | Ensemble separation checks (for doctor). |
-| `input` | object | no | Human scope/prompt for the run. Required at execution time. |
+| `roles` | map | yes | Role-specific overrides. Must contain at least one configured role. |
+| `role_order` | list[string] | no | Explicit execution order. Must contain every configured role exactly once. |
+| `constraints` | object | no | Doctor/governance policy knobs. |
+| `input` | object | no | Human scope and optional additional run context. |
 | `output` | object | no | Artifact/output behavior flags. |
 | `gating` | object | no | Pipeline failure gating preferences. |
 | `runtime` | object | no | Adapter and runtime execution settings. |
@@ -21,17 +22,45 @@
 
 | Key | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `scope` | string | no | Recommended primary task/scope field. `ese start` requires this unless `--scope` is provided. |
-| `prompt` | string | no | Optional supplemental run context. Used as a fallback when `scope` is absent, and appended to role prompts when both are present. |
+| `scope` | string | no | Recommended primary task/scope field. Required at execution time unless `--scope` is provided. |
+| `prompt` | string | no | Supplemental run context. Used as additional run context, not duplicated again at the adapter layer. |
 
 ## Provider object
 
 | Key | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `name` | string | yes | Non-empty provider identifier (for example `openai`, `my-gateway`). |
+| `name` | string | yes | Non-empty provider identifier such as `openai`, `local`, or `my-gateway`. |
 | `model` | string | yes | Non-empty default model identifier. |
-| `api_key_env` | string | no | Non-empty env var name used for auth token lookup. |
-| `base_url` | string | no | Optional provider endpoint; required for `runtime.adapter=custom_api` unless supplied at `runtime.custom_api.base_url`. |
+| `api_key_env` | string | no | Env var name used for auth token lookup. |
+| `base_url` | string | no | Optional provider endpoint. Required for `runtime.adapter=custom_api` unless supplied at `runtime.custom_api.base_url`. |
+
+## Role object
+
+Allowed per-role keys in all modes:
+- `provider`
+- `model`
+- `temperature`
+- `prompt`
+
+When `strict_config: true`, any other per-role key is rejected.
+
+## Constraints object
+
+| Key | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `disallow_same_model_pairs` | list[[string, string]] | no | Additional role pairs that must not resolve to the same model identity in ensemble mode. |
+| `require_roles` | list[string] | no | Roles that must exist in the config. |
+| `minimum_distinct_models` | int | no | Ensemble-only minimum number of distinct resolved role models. Must be `> 0`. |
+| `minimum_specialist_roles` | int | no | Minimum count of configured non-architect/non-implementer roles. Must be `>= 0`. |
+| `disallow_same_provider_pairs` | list[[string, string]] | no | Role pairs that must not resolve to the same provider identity in ensemble mode. |
+| `require_json_for_roles` | list[string] | no | If any listed role is configured, `output.enforce_json` must be `true`. |
+
+Baseline same-model separation is always enforced in ensemble mode for:
+- `architect` / `implementer`
+- `implementer` / `adversarial_reviewer`
+- `implementer` / `security_auditor`
+- `adversarial_reviewer` / `security_auditor`
+- `implementer` / `release_manager`
 
 ## Runtime object
 
@@ -42,8 +71,9 @@
 | `max_retries` | int | no | Must be `>= 0`. |
 | `retry_backoff_seconds` | float | no | Must be `> 0`. |
 | `max_output_tokens` | int | no | Must be `> 0` when set. |
+| `review_isolation` | enum | no | `framed`, `implementation_only`, `scope_only`, or `scope_and_implementation` (default). |
 | `openai.base_url` | string | no | Optional OpenAI endpoint override. |
-| `local.base_url` | string | no | Optional Ollama OpenAI-compatible endpoint override. Defaults to `http://localhost:11434/v1`. |
+| `local.base_url` | string | no | Optional Ollama/OpenAI-compatible endpoint override. Defaults to `http://localhost:11434/v1`. |
 | `local.use_openai_compat_auth` | bool | no | Sends `Bearer ollama` for clients/endpoints that expect OpenAI-style auth headers. Defaults to `true`. |
 | `custom_api.base_url` | string | no | Optional custom API endpoint override. |
 
@@ -60,48 +90,35 @@
 | --- | --- | --- | --- |
 | `fail_on_high` | bool | no | When `true` (default), pipeline execution stops on `HIGH` or `CRITICAL` findings. Requires `output.enforce_json=true`. |
 
-## `openai` validation rules
+## Adapter validation rules
 
 When `runtime.adapter=openai`:
-- `provider.name` must be `openai`.
-- All role providers must resolve to `openai`.
-
-## `local` validation rules
+- `provider.name` must be `openai`
+- all role providers must resolve to `openai`
 
 When `runtime.adapter=local`:
-- `provider.name` must be `local`.
-- All role providers must resolve to `local`.
-- ESE expects an Ollama-compatible endpoint, defaulting to `http://localhost:11434/v1`.
-
-## Demo configs
-
-- `runtime.adapter=dry-run` is the supported demo path.
-- Demo configs may still carry provider/model defaults for the ensemble without requiring auth or live API calls.
-
-## `custom_api` validation rules
+- `provider.name` must be `local`
+- all role providers must resolve to `local`
+- ESE expects an Ollama-compatible endpoint
 
 When `runtime.adapter=custom_api`:
-- `provider.name` must not be `openai`.
-- `provider.api_key_env` is required.
-- One of `provider.base_url` or `runtime.custom_api.base_url` is required.
-- Role model references must match configured provider name and include a model id.
+- `provider.name` must not be `openai`
+- `provider.api_key_env` is required
+- one of `provider.base_url` or `runtime.custom_api.base_url` is required
+- all role providers must resolve to the configured provider name
 
-## Version and migration policy
+## Solo and degraded assurance semantics
 
-- Current supported config version: `1`.
-- Any other `version` value fails validation with a field-level error.
-- Breaking config schema changes will increment `version` and require explicit migration.
-- Migration process for future versions:
-  1. Add a versioned migration document.
-  2. Add compatibility tests for old/new versions.
-  3. Provide upgrade examples and failure modes in release notes.
+`mode: solo` remains valid, but its artifacts and reports are marked with `assurance_level: degraded`.
+Degraded assurance runs should not be treated as equivalent release evidence to full ensemble runs.
 
 ## Validation behavior
 
-Validation is performed by `ese.config.validate_config` (Pydantic-backed).
-Invalid configs fail fast with field-level errors surfaced by `ese doctor` and `ese start`.
+Validation is performed by `ese.config.validate_config`.
+Doctor policy is then enforced by `ese doctor` and by all execution entry points:
+- `ese start`
+- `ese task`
+- `ese pr`
+- `ese rerun`
 
-## Framework vs pack installs
-
-- Framework-mode configs typically set `role_order`, custom role keys, `roles.<role>.responsibility`, and starter `roles.<role>.prompt` text.
-- Pack-mode configs use the same schema, but the role catalog and role order come from the selected pack rather than from the installer.
+Violations fail with exit code `2`.

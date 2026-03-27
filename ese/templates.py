@@ -7,14 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from ese.config import ConfigValidationError, validate_config, write_config
-from ese.provider_runtime import (
-    BUILTIN_LIVE_RUNTIME_ADAPTERS,
-    builtin_runtime_adapter,
-    default_api_key_env,
-    provider_runtime_capability,
-    supports_builtin_live,
-)
-from ese.repo_context import RepoContextError, build_repo_context, render_repo_context
 from ese.init_wizard import (
     COMMON_MODELS_BY_PROVIDER,
     GOAL_DEFAULT_ROLES,
@@ -24,6 +16,14 @@ from ese.init_wizard import (
     _roles_for_preset,
 )
 from ese.pipeline import run_pipeline
+from ese.provider_runtime import (
+    BUILTIN_LIVE_RUNTIME_ADAPTERS,
+    builtin_runtime_adapter,
+    default_api_key_env,
+    provider_runtime_capability,
+    supports_builtin_live,
+)
+from ese.repo_context import RepoContextError, build_repo_context, render_repo_context
 
 AUTO_EXECUTION_MODE = "auto"
 DEMO_EXECUTION_MODE = "demo"

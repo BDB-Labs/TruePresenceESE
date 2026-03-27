@@ -97,6 +97,9 @@ The wizard now asks for:
 ese doctor --config ese.config.yaml
 ```
 
+`ese start`, `ese task`, `ese pr`, and `ese rerun` now enforce the same doctor policy before execution.
+Violations fail consistently with exit code `2`, so task-first and PR-review flows cannot bypass ensemble policy checks.
+
 3. Execute the pipeline:
 
 ```bash
@@ -104,6 +107,7 @@ ese start --config ese.config.yaml
 ```
 
 Pass `--artifacts-dir ...` only when you want to override `output.artifacts_dir` from the config.
+Use `--quiet` on `start`, `task`, `pr`, or `rerun` when you want machine-friendlier output with preflight/follow-up chatter suppressed.
 
 4. Review outputs:
 - `artifacts/ese_summary.md`
@@ -151,6 +155,7 @@ Status and aggregated reporting for an artifacts directory:
 
 ```bash
 ese status --artifacts-dir artifacts
+ese status --artifacts-dir artifacts --json
 ese report --artifacts-dir artifacts
 ```
 
@@ -160,6 +165,8 @@ Rerun from a specific role while reusing upstream artifacts:
 ese rerun implementer --artifacts-dir artifacts
 ```
 
+Reruns now write `start_role` and `parent_run_id` into `pipeline_state.json` so downstream tooling can follow lineage.
+
 Launch the local dashboard:
 
 ```bash
@@ -167,6 +174,56 @@ ese dashboard --artifacts-dir artifacts
 ```
 
 The dashboard now supports both task-first runs and PR review runs.
+
+## Governance And Assurance
+
+Baseline ensemble independence is now enforced even when configs omit explicit constraints:
+- `architect` and `implementer` must not share a model.
+- `implementer` must not share a model with `adversarial_reviewer`, `security_auditor`, or `release_manager`.
+- `adversarial_reviewer` and `security_auditor` must not share a model.
+
+Solo mode still runs, but artifacts and reports are marked with `assurance_level: degraded`.
+Degraded assurance runs should not be treated as equivalent release evidence to full ensemble runs.
+
+Additional policy knobs are available under `constraints`, including:
+- `require_roles`
+- `minimum_distinct_models`
+- `minimum_specialist_roles`
+- `disallow_same_provider_pairs`
+- `require_json_for_roles`
+
+Set `strict_config: true` to reject unknown top-level keys and unknown per-role keys outside `provider`, `model`, `temperature`, and `prompt`.
+
+## Prompt Isolation And JSON Contracts
+
+`runtime.review_isolation` controls what specialists and fallback roles can see:
+- `framed`
+- `implementation_only`
+- `scope_only`
+- `scope_and_implementation` (default)
+
+When `output.enforce_json: true`, role reports must now include:
+- `summary`
+- `confidence`
+- `assumptions`
+- `unknowns`
+- `findings`
+- `artifacts`
+- `next_steps`
+- `code_suggestions`
+
+`evidence_basis` is optional and preserved when present.
+See `docs/ROLE_REPORT_CONTRACT.md` for the exact schema and semantics.
+
+## Artifact Metadata
+
+Each run now writes lineage and assurance metadata into `pipeline_state.json` and `ese_summary.md`, including:
+- `run_id`
+- `assurance_level`
+- `parent_run_id` for reruns
+- `start_role` for reruns
+- `state_contract_version`
+- `report_contract_version`
 
 ## Framework role drafting
 
@@ -199,6 +256,7 @@ Built-in runtime adapters:
 - `module:function`: custom Python callable adapter.
 
 When `output.enforce_json: true`, adapters must return valid JSON role reports and `gating.fail_on_high: true` will stop the pipeline on `HIGH` or `CRITICAL` findings.
+Adapter prompts now use the assembled prompt as the canonical input, with structured context kept separate for tooling/metadata.
 
 ## Demo vs live setup
 
@@ -258,6 +316,9 @@ runtime:
 ## Contract documentation
 
 - Config schema + version policy: [`docs/CONFIG_CONTRACT.md`](docs/CONFIG_CONTRACT.md)
+- Role report JSON contract: [`docs/ROLE_REPORT_CONTRACT.md`](docs/ROLE_REPORT_CONTRACT.md)
+- Pipeline state and lineage contract: [`docs/PIPELINE_STATE.md`](docs/PIPELINE_STATE.md)
+- Release evidence guidance: [`docs/RELEASE.md`](docs/RELEASE.md)
 - Pipeline state schema + deterministic role ordering: [`docs/PIPELINE_STATE.md`](docs/PIPELINE_STATE.md)
 - Troubleshooting: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 - Contributor CI requirements: [`CONTRIBUTING.md`](CONTRIBUTING.md)
