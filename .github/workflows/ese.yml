@@ -33,6 +33,8 @@ jobs:
           cat > ese.config.yaml <<'YAML'
           version: 1
           mode: ensemble
+          input:
+            scope: "Validate ESE governance and dry-run pipeline behavior in CI"
           provider:
             name: openai
             model: gpt-5
