@@ -18,6 +18,9 @@ ese doctor --config ese.config.yaml
 ese start --config ese.config.yaml --artifacts-dir artifacts
 ```
 
+Treat `assurance_level: degraded` runs as lower-confidence evidence.
+Solo or degraded runs should not be used as equivalent release sign-off evidence to a full ensemble run.
+
 ## Publish flow
 
 1. Create and push a release tag (for example `v1.0.0`).
@@ -38,3 +41,4 @@ ese roles
 ```
 
 Confirm CLI loads and basic commands execute.
+Confirm release evidence was generated from a `standard` assurance run when using ESE artifacts in a ship/no-ship decision.

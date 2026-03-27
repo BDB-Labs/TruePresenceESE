@@ -3,7 +3,12 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from ese.dashboard import DashboardJobStore, _allocate_run_artifacts_dir, _export_report_payload, _task_run_kwargs
+from ese.dashboard import (
+    DashboardJobStore,
+    _allocate_run_artifacts_dir,
+    _export_report_payload,
+    _task_run_kwargs,
+)
 from ese.pipeline import run_pipeline
 
 

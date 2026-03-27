@@ -4,7 +4,15 @@ import json
 
 import pytest
 
-from ese.adapters import AdapterExecutionError, custom_api_adapter, local_adapter, openai_adapter
+from ese.adapters import (
+    AdapterExecutionError,
+    _openai_payload,
+    _redact_error_text,
+    _retry_delay,
+    custom_api_adapter,
+    local_adapter,
+    openai_adapter,
+)
 from ese.local_runtime import LocalRuntimeError
 
 
@@ -243,3 +251,30 @@ def test_local_adapter_can_disable_openai_compat_auth(monkeypatch: pytest.Monkey
     )
 
     assert output == "local ok"
+
+
+def test_openai_payload_uses_prompt_as_canonical_input() -> None:
+    payload = _openai_payload(
+        role="architect",
+        model_name="gpt-5-mini",
+        prompt="Scope:\nReview the rollout",
+        context={"architect": "duplicate me"},
+        cfg=_openai_cfg(),
+    )
+
+    assert payload["input"] == "Scope:\nReview the rollout"
+    assert "duplicate me" not in payload["input"]
+
+
+def test_redact_error_text_removes_token_like_values() -> None:
+    redacted = _redact_error_text("Authorization: Bearer sk-secret-token api_key=supersecret123")
+
+    assert "sk-secret-token" not in redacted
+    assert "supersecret123" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_retry_delay_supports_deterministic_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ese.adapters.random.uniform", lambda left, right: 1.05)
+
+    assert _retry_delay(2.0, 3) == pytest.approx(6.3)

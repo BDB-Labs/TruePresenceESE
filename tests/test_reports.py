@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,11 +9,14 @@ import pytest
 from ese.feedback import record_feedback
 from ese.pipeline import run_pipeline
 from ese.reports import (
+    build_release_simulation,
     collect_run_report,
     list_recent_runs,
     load_artifact_view,
     render_junit,
+    render_report_text,
     render_sarif,
+    render_status_text,
 )
 
 
@@ -40,6 +43,21 @@ def _cfg() -> dict:
     }
 
 
+def _json_report(summary: str, **overrides) -> str:
+    payload = {
+        "summary": summary,
+        "confidence": "MEDIUM",
+        "assumptions": [],
+        "unknowns": [],
+        "findings": [],
+        "artifacts": [],
+        "next_steps": [],
+        "code_suggestions": [],
+    }
+    payload.update(overrides)
+    return json.dumps(payload)
+
+
 def test_collect_run_report_summarizes_pipeline_outputs(tmp_path: Path) -> None:
     artifacts_dir = tmp_path / "artifacts"
     run_pipeline(_cfg(), artifacts_dir=str(artifacts_dir))
@@ -47,12 +65,81 @@ def test_collect_run_report_summarizes_pipeline_outputs(tmp_path: Path) -> None:
     report = collect_run_report(str(artifacts_dir))
 
     assert report["status"] == "completed"
+    assert report["run_id"]
+    assert report["assurance_level"] == "standard"
     assert report["finding_count"] == 0
     assert len(report["roles"]) == 3
     assert report["roles"][0]["role"] == "architect"
     assert report["config_snapshot"] == str(artifacts_dir / "ese_config.snapshot.yaml")
     assert report["documents"][0]["key"] == "summary"
     assert report["updated_at"]
+
+
+def test_render_status_text_includes_assurance_and_run_id(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    run_pipeline(_cfg(), artifacts_dir=str(artifacts_dir))
+
+    report = collect_run_report(str(artifacts_dir))
+    rendered = render_status_text(report)
+
+    assert "Assurance: standard" in rendered
+    assert "Run ID:" in rendered
+
+
+def test_render_report_text_includes_confidence_sections_and_recurring_unknowns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+
+    def _adapter(**kwargs) -> str:  # noqa: ANN003
+        role = kwargs["role"]
+        if role == "architect":
+            return _json_report(
+                "Architecture found a blocker.",
+                confidence="LOW",
+                unknowns=["Traffic patterns are unknown."],
+                findings=[
+                    {
+                        "severity": "HIGH",
+                        "title": "Missing rollback path",
+                        "details": "Rollback sequencing is not documented.",
+                    },
+                ],
+            )
+        if role == "implementer":
+            return _json_report(
+                "Implementation complete.",
+                confidence="MEDIUM",
+                unknowns=["Traffic patterns are unknown."],
+            )
+        return _json_report("Review complete.", confidence="HIGH")
+
+    monkeypatch.setattr("ese.pipeline._resolve_adapter", lambda cfg: ("reporting", _adapter))
+    cfg = _cfg()
+    cfg["gating"] = {"fail_on_high": False}
+    run_pipeline(cfg, artifacts_dir=str(artifacts_dir))
+
+    report = collect_run_report(str(artifacts_dir))
+    rendered = render_report_text(report)
+
+    assert "confidence=LOW" in rendered
+    assert "Low-confidence blockers:" in rendered
+    assert "Recurring unknowns:" in rendered
+
+
+def test_degraded_assurance_makes_release_simulation_not_ready(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    cfg = _cfg()
+    cfg["mode"] = "solo"
+    run_pipeline(cfg, artifacts_dir=str(artifacts_dir))
+
+    report = collect_run_report(str(artifacts_dir))
+    release = build_release_simulation(report)
+
+    assert report["assurance_level"] == "degraded"
+    assert not release["ready_for_release"]
+    assert "degraded assurance" in release["summary"].lower()
 
 
 def test_list_recent_runs_discovers_sibling_runs(tmp_path: Path) -> None:
@@ -96,40 +183,30 @@ def test_collect_run_report_includes_comparison_feedback_and_code_suggestions(
 
     def _clean_adapter(**kwargs) -> str:  # noqa: ANN003
         role = kwargs["role"]
-        return json.dumps(
-            {
-                "summary": f"{role} completed cleanly.",
-                "findings": [],
-                "artifacts": [],
-                "next_steps": [],
-            },
-        )
+        return _json_report(f"{role} completed cleanly.")
 
     def _finding_adapter(**kwargs) -> str:  # noqa: ANN003
         role = kwargs["role"]
         if role == "adversarial_reviewer":
-            return json.dumps(
-                {
-                    "summary": "Reviewer found a concrete defect.",
-                    "findings": [
-                        {
-                            "severity": "HIGH",
-                            "title": "Null dereference risk",
-                            "details": "Guard the optional config object before dereferencing it in the request path.",
-                        },
-                    ],
-                    "artifacts": [],
-                    "next_steps": ["Add a guard clause and cover it with a regression test."],
-                    "code_suggestions": [
-                        {
-                            "path": "src/request_handler.py",
-                            "kind": "patch",
-                            "summary": "Guard the optional config before access",
-                            "suggestion": "Guard the optional config object before dereferencing it in the request path.",
-                            "snippet": "if config is None:\n    return default_response()",
-                        },
-                    ],
-                },
+            return _json_report(
+                "Reviewer found a concrete defect.",
+                findings=[
+                    {
+                        "severity": "HIGH",
+                        "title": "Null dereference risk",
+                        "details": "Guard the optional config object before dereferencing it in the request path.",
+                    },
+                ],
+                next_steps=["Add a guard clause and cover it with a regression test."],
+                code_suggestions=[
+                    {
+                        "path": "src/request_handler.py",
+                        "kind": "patch",
+                        "summary": "Guard the optional config before access",
+                        "suggestion": "Guard the optional config object before dereferencing it in the request path.",
+                        "snippet": "if config is None:\n    return default_response()",
+                    },
+                ],
             )
         return _clean_adapter(**kwargs)
 

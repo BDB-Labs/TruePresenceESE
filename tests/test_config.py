@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from ese.config import ConfigValidationError, resolve_role_model, validate_config
+from ese.config import (
+    ConfigValidationError,
+    resolve_role_identity,
+    resolve_role_model,
+    resolve_role_provider,
+    validate_config,
+)
 
 
 def _base_cfg() -> dict:
@@ -70,6 +76,19 @@ def test_resolve_role_model_prefers_role_override() -> None:
     model_ref = resolve_role_model(cfg, "architect")
 
     assert model_ref == "openrouter:openai/gpt-5"
+
+
+def test_resolve_role_provider_and_identity_normalize_values() -> None:
+    cfg = _base_cfg()
+    cfg["provider"] = {
+        "name": " OpenAI ",
+        "model": " GPT-5-Mini ",
+        "api_key_env": "OPENAI_API_KEY",
+    }
+    cfg["roles"]["architect"] = {"provider": "OpenRouter", "model": " OpenAI/GPT-5 "}
+
+    assert resolve_role_provider(cfg, "architect") == "openrouter"
+    assert resolve_role_identity(cfg, "architect") == "openrouter:openai/gpt-5"
 
 
 def test_custom_api_contract_requires_base_url() -> None:
@@ -180,3 +199,25 @@ def test_validate_config_rejects_role_order_unknown_role() -> None:
         validate_config(cfg, source="test.yaml")
 
     assert "role_order references unknown configured roles" in str(exc.value)
+
+
+def test_validate_config_rejects_unknown_top_level_keys_when_strict() -> None:
+    cfg = _base_cfg()
+    cfg["strict_config"] = True
+    cfg["surprise"] = "value"
+
+    with pytest.raises(ConfigValidationError) as exc:
+        validate_config(cfg, source="test.yaml")
+
+    assert "strict_config rejects unknown top-level keys" in str(exc.value)
+
+
+def test_validate_config_rejects_unknown_role_keys_when_strict() -> None:
+    cfg = _base_cfg()
+    cfg["strict_config"] = True
+    cfg["roles"]["architect"]["responsibility"] = "design everything"
+
+    with pytest.raises(ConfigValidationError) as exc:
+        validate_config(cfg, source="test.yaml")
+
+    assert "strict_config rejects unknown per-role keys" in str(exc.value)

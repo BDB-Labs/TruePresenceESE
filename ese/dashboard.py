@@ -14,8 +14,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from ese.config import ConfigValidationError, load_config
-from ese.feedback import record_feedback
 from ese.doctor import evaluate_doctor
+from ese.feedback import record_feedback
 from ese.pipeline import run_pipeline
 from ese.pr_review import PullRequestReviewError, run_pr_review
 from ese.reports import (
@@ -26,7 +26,11 @@ from ese.reports import (
     render_junit,
     render_sarif,
 )
-from ese.templates import list_task_templates, recommend_template_for_scope, run_task_pipeline
+from ese.templates import (
+    list_task_templates,
+    recommend_template_for_scope,
+    run_task_pipeline,
+)
 
 
 class DashboardJobStore:

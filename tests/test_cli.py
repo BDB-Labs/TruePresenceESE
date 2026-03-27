@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
 from typer.testing import CliRunner
 
-from ese.cli import app
-
+from ese.cli import app, main
 
 runner = CliRunner()
 
@@ -55,27 +55,39 @@ def test_packs_command_lists_construction_pack() -> None:
     assert "construction-contract-intelligence" in result.stdout
 
 
-def test_no_args_launches_dashboard(monkeypatch) -> None:
-    calls: list[dict[str, object]] = []
-
-    def _fake_serve_dashboard(**kwargs):  # noqa: ANN003
-        calls.append(kwargs)
-
-    monkeypatch.setattr("ese.cli.serve_dashboard", _fake_serve_dashboard)
-
+def test_no_args_prints_help_when_non_interactive() -> None:
     result = runner.invoke(app, [])
 
     assert result.exit_code == 0
-    assert "Serving ESE dashboard" in result.stdout
-    assert calls == [
-        {
-            "artifacts_dir": "artifacts",
-            "host": "127.0.0.1",
-            "port": 8765,
-            "open_browser": True,
-            "config_path": None,
-        }
-    ]
+    assert "Usage:" in result.stdout
+    assert "dashboard" in result.stdout
+
+
+def test_no_args_launches_dashboard_when_interactive(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def _fake_launch_dashboard(**kwargs):  # noqa: ANN003
+        calls.append(kwargs)
+
+    class _InteractiveStream:
+        @staticmethod
+        def isatty() -> bool:
+            return True
+
+    class _FakeContext:
+        invoked_subcommand = None
+
+        @staticmethod
+        def get_help() -> str:
+            return "help"
+
+    monkeypatch.setattr("ese.cli._launch_dashboard", _fake_launch_dashboard)
+    monkeypatch.setattr("ese.cli.sys.stdin", _InteractiveStream())
+    monkeypatch.setattr("ese.cli.sys.stdout", _InteractiveStream())
+
+    main(_FakeContext())
+
+    assert calls == [{}]
 
 
 def test_doctor_command_exits_nonzero_on_violation(tmp_path: Path) -> None:
@@ -173,6 +185,28 @@ def test_task_command_runs_template_without_hand_written_config(tmp_path: Path) 
     assert "Task run completed" in result.stdout
 
 
+def test_task_command_fails_on_doctor_violations(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.cli.build_task_config",
+        lambda **kwargs: {
+            "version": 1,
+            "mode": "ensemble",
+            "provider": {"name": "openai", "model": "gpt-5-mini"},
+            "roles": {
+                "architect": {"model": "gpt-5"},
+                "implementer": {"model": "gpt-5"},
+            },
+            "runtime": {"adapter": "dry-run"},
+            "input": {"scope": "Review the rollout"},
+        },
+    )
+
+    result = runner.invoke(app, ["task", "Review the rollout"])
+
+    assert result.exit_code == 2
+    assert "ESE doctor failed" in result.stdout
+
+
 def test_status_and_report_commands_summarize_artifacts(tmp_path: Path) -> None:
     cfg = _base_cfg()
     config_path = _write_cfg(tmp_path / "ese.config.yaml", cfg)
@@ -188,6 +222,10 @@ def test_status_and_report_commands_summarize_artifacts(tmp_path: Path) -> None:
         app,
         ["status", "--artifacts-dir", str(artifacts_dir)],
     )
+    status_json_result = runner.invoke(
+        app,
+        ["status", "--artifacts-dir", str(artifacts_dir), "--json"],
+    )
     report_result = runner.invoke(
         app,
         ["report", "--artifacts-dir", str(artifacts_dir)],
@@ -195,8 +233,26 @@ def test_status_and_report_commands_summarize_artifacts(tmp_path: Path) -> None:
 
     assert status_result.exit_code == 0
     assert "Status: completed" in status_result.stdout
+    assert status_json_result.exit_code == 0
+    assert json.loads(status_json_result.stdout)["status"] == "completed"
     assert report_result.exit_code == 0
     assert "Roles:" in report_result.stdout
+
+
+def test_start_quiet_suppresses_preflight_chatter(tmp_path: Path) -> None:
+    cfg = _base_cfg()
+    config_path = _write_cfg(tmp_path / "ese.config.yaml", cfg)
+    artifacts_dir = tmp_path / "artifacts"
+
+    result = runner.invoke(
+        app,
+        ["start", "--config", config_path, "--artifacts-dir", str(artifacts_dir), "--quiet"],
+    )
+
+    assert result.exit_code == 0
+    assert "Preflight:" not in result.stdout
+    assert "Top consensus:" not in result.stdout
+    assert str(artifacts_dir / "ese_summary.md") in result.stdout
 
 
 def test_export_and_feedback_commands_write_outputs(tmp_path: Path) -> None:
@@ -268,20 +324,25 @@ def test_suggestions_command_renders_filtered_code_suggestions(monkeypatch) -> N
     assert "Validate the tenant token" in result.stdout
 
 
-def test_pr_command_runs_pull_request_review(monkeypatch) -> None:
+def test_pr_command_runs_pull_request_review(monkeypatch, tmp_path: Path) -> None:
     context = type("Context", (), {"head_ref": "feature", "base_ref": "origin/main"})()
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir()
 
     def _fake_build_pr_review_config(**kwargs):  # noqa: ANN003
         return (
             context,
             {
+                "provider": {"name": "openai", "model": "gpt-5-mini"},
+                "roles": {"adversarial_reviewer": {}},
+                "input": {"scope": "Review the pull request safely"},
                 "runtime": {"adapter": "dry-run"},
-                "output": {"artifacts_dir": "/tmp/artifacts"},
+                "output": {"artifacts_dir": str(artifacts_dir)},
             },
         )
 
     monkeypatch.setattr("ese.cli.build_pr_review_config", _fake_build_pr_review_config)
-    monkeypatch.setattr("ese.cli.run_pipeline", lambda **kwargs: "/tmp/artifacts/ese_summary.md")
+    monkeypatch.setattr("ese.cli.run_pipeline", lambda **kwargs: str(artifacts_dir / "ese_summary.md"))
     monkeypatch.setattr(
         "ese.cli.collect_run_report",
         lambda artifacts_dir: {"roles": [], "blockers": [], "next_steps": []},
@@ -304,3 +365,50 @@ def test_pr_command_runs_pull_request_review(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "PR review completed" in result.stdout
     assert "pr_review.md" in result.stdout
+
+
+def test_pr_command_fails_on_doctor_violations(monkeypatch) -> None:
+    context = type("Context", (), {"head_ref": "feature", "base_ref": "origin/main"})()
+    monkeypatch.setattr(
+        "ese.cli.build_pr_review_config",
+        lambda **kwargs: (
+            context,
+            {
+                "version": 1,
+                "mode": "ensemble",
+                "provider": {"name": "openai", "model": "gpt-5-mini"},
+                "roles": {
+                    "architect": {"model": "gpt-5"},
+                    "implementer": {"model": "gpt-5"},
+                },
+                "runtime": {"adapter": "dry-run"},
+                "input": {"scope": "Review the diff"},
+                "output": {"artifacts_dir": "artifacts"},
+            },
+        ),
+    )
+
+    result = runner.invoke(app, ["pr", "--repo-path", ".", "--base", "origin/main", "--head", "feature"])
+
+    assert result.exit_code == 2
+    assert "ESE doctor failed" in result.stdout
+
+
+def test_rerun_command_fails_on_doctor_violations(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir()
+    _write_cfg(
+        artifacts_dir / "ese_config.snapshot.yaml",
+        {
+            **_base_cfg(),
+            "roles": {
+                "architect": {"model": "gpt-5"},
+                "implementer": {"model": "gpt-5"},
+            },
+        },
+    )
+
+    result = runner.invoke(app, ["rerun", "implementer", "--artifacts-dir", str(artifacts_dir)])
+
+    assert result.exit_code == 2
+    assert "ESE doctor failed" in result.stdout
