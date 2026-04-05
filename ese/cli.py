@@ -267,9 +267,14 @@ def list_roles():
 
 @app.command("packs")
 def list_packs():
-    """List shipped config packs with fixed role catalogs."""
-    typer.echo("Shipped config packs:")
-    for pack in list_config_packs():
+    """List installed config packs discovered outside the ESE core package."""
+    packs = list_config_packs()
+    if not packs:
+        typer.echo("No config packs installed.")
+        return
+
+    typer.echo("Installed config packs:")
+    for pack in packs:
         typer.echo(f"  - {pack.key}: {pack.title} - {pack.summary}")
 
 

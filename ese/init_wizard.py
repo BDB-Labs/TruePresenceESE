@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, TypeVar
 
 import questionary
 
@@ -14,6 +14,22 @@ from ese.config import (
     write_config,
 )
 from ese.config_packs import ConfigPackDefinition, get_config_pack, list_config_packs
+from ese.framework_defaults import (
+    COMMON_MODELS_BY_PROVIDER,
+    GOAL_PROFILES,
+    GOAL_TO_PRESET,
+    PRESET_TO_GOAL_PROFILE,
+    RECOMMENDED_MODEL_BY_PROVIDER_GOAL,
+)
+from ese.framework_defaults import (
+    apply_simple_mode_model_diversity as _apply_simple_mode_model_diversity,
+)
+from ese.framework_defaults import (
+    ensemble_constraints as _ensemble_constraints,
+)
+from ese.framework_defaults import (
+    roles_for_preset as _framework_roles_for_preset,
+)
 from ese.provider_runtime import (
     PROVIDER_CHOICES,
     builtin_runtime_adapter,
@@ -28,7 +44,6 @@ from ese.provider_runtime import (
 from ese.role_drafting import (
     FrameworkRoleInput,
     draft_framework_roles,
-    normalize_role_key,
 )
 
 DEMO_EXECUTION_MODE = "demo"
@@ -36,143 +51,6 @@ LIVE_EXECUTION_MODE = "live"
 CUSTOM_MODULE_EXECUTION_MODE = "custom_module"
 FRAMEWORK_CONFIG_TYPE = "framework"
 PACK_CONFIG_TYPE = "pack"
-
-GOAL_PROFILES = [
-    "fast",
-    "balanced",
-    "high-quality",
-    "security-heavy",
-]
-
-GOAL_TO_PRESET = {
-    "fast": "fast",
-    "balanced": "balanced",
-    "high-quality": "strict",
-    "security-heavy": "paranoid",
-}
-
-PRESET_TO_GOAL_PROFILE = {
-    "fast": "fast",
-    "balanced": "balanced",
-    "strict": "high-quality",
-    "paranoid": "security-heavy",
-}
-
-GOAL_DEFAULT_ROLES: Dict[str, list[str]] = {
-    "fast": [
-        "architect",
-        "implementer",
-        "adversarial_reviewer",
-        "test_generator",
-    ],
-    "balanced": [
-        "architect",
-        "implementer",
-        "adversarial_reviewer",
-        "security_auditor",
-        "test_generator",
-        "performance_analyst",
-    ],
-    "high-quality": [
-        "architect",
-        "implementer",
-        "adversarial_reviewer",
-        "security_auditor",
-        "test_generator",
-        "performance_analyst",
-        "documentation_writer",
-    ],
-    "security-heavy": [
-        "architect",
-        "implementer",
-        "adversarial_reviewer",
-        "security_auditor",
-        "test_generator",
-        "performance_analyst",
-        "devops_sre",
-        "database_engineer",
-        "release_manager",
-    ],
-}
-
-COMMON_MODELS_BY_PROVIDER: Dict[str, list[str]] = {
-    "openai": [
-        "gpt-5",
-        "gpt-5-mini",
-        "gpt-5-nano",
-        "o3",
-    ],
-    "anthropic": [
-        "claude-sonnet-4",
-        "claude-opus-4",
-    ],
-    "google": [
-        "gemini-2.0-flash",
-        "gemini-2.0-pro",
-    ],
-    "xai": [
-        "grok-3",
-        "grok-3-mini",
-    ],
-    "openrouter": [
-        "openai/gpt-5",
-        "anthropic/claude-sonnet-4",
-        "google/gemini-2.0-pro",
-    ],
-    "huggingface": [
-        "meta-llama/Llama-3.3-70B-Instruct",
-        "Qwen/Qwen2.5-Coder-32B-Instruct",
-    ],
-    "local": [
-        "llama3.1:8b",
-        "qwen2.5-coder:14b",
-    ],
-}
-
-RECOMMENDED_MODEL_BY_PROVIDER_GOAL: Dict[str, Dict[str, str]] = {
-    "openai": {
-        "fast": "gpt-5-mini",
-        "balanced": "gpt-5",
-        "high-quality": "gpt-5",
-        "security-heavy": "o3",
-    },
-    "anthropic": {
-        "fast": "claude-sonnet-4",
-        "balanced": "claude-sonnet-4",
-        "high-quality": "claude-opus-4",
-        "security-heavy": "claude-opus-4",
-    },
-    "google": {
-        "fast": "gemini-2.0-flash",
-        "balanced": "gemini-2.0-pro",
-        "high-quality": "gemini-2.0-pro",
-        "security-heavy": "gemini-2.0-pro",
-    },
-    "xai": {
-        "fast": "grok-3-mini",
-        "balanced": "grok-3",
-        "high-quality": "grok-3",
-        "security-heavy": "grok-3",
-    },
-    "openrouter": {
-        "fast": "openai/gpt-5",
-        "balanced": "anthropic/claude-sonnet-4",
-        "high-quality": "google/gemini-2.0-pro",
-        "security-heavy": "anthropic/claude-opus-4",
-    },
-    "huggingface": {
-        "fast": "Qwen/Qwen2.5-Coder-32B-Instruct",
-        "balanced": "meta-llama/Llama-3.3-70B-Instruct",
-        "high-quality": "meta-llama/Llama-3.3-70B-Instruct",
-        "security-heavy": "meta-llama/Llama-3.3-70B-Instruct",
-    },
-    "local": {
-        "fast": "llama3.1:8b",
-        "balanced": "qwen2.5-coder:14b",
-        "high-quality": "qwen2.5-coder:14b",
-        "security-heavy": "qwen2.5-coder:14b",
-    },
-}
 
 MODEL_ALIASES_BY_PROVIDER: Dict[str, Dict[str, str]] = {
     "openai": {
@@ -231,64 +109,11 @@ DEFAULT_SELECTED_ROLES = [
     "performance_analyst",
 ]
 
-DEFAULT_DISALLOW_SAME_MODEL_PAIRS = [
-    ("architect", "implementer"),
-    ("implementer", "adversarial_reviewer"),
-    ("implementer", "security_auditor"),
-    ("adversarial_reviewer", "security_auditor"),
-    ("implementer", "release_manager"),
-]
+T = TypeVar("T")
 
-ROLE_DEFAULTS_BY_PRESET: Dict[str, Dict[str, Dict[str, Any]]] = {
-    "fast": {
-        "architect": {"temperature": 0.2},
-        "implementer": {"temperature": 0.1},
-        "adversarial_reviewer": {"temperature": 0.6},
-        "security_auditor": {"temperature": 0.2},
-        "test_generator": {"temperature": 0.2},
-        "performance_analyst": {"temperature": 0.2},
-        "documentation_writer": {"temperature": 0.3},
-        "devops_sre": {"temperature": 0.2},
-        "database_engineer": {"temperature": 0.2},
-        "release_manager": {"temperature": 0.2},
-    },
-    "balanced": {
-        "architect": {"temperature": 0.2},
-        "implementer": {"temperature": 0.1},
-        "adversarial_reviewer": {"temperature": 0.7},
-        "security_auditor": {"temperature": 0.2},
-        "test_generator": {"temperature": 0.2},
-        "performance_analyst": {"temperature": 0.2},
-        "documentation_writer": {"temperature": 0.2},
-        "devops_sre": {"temperature": 0.2},
-        "database_engineer": {"temperature": 0.2},
-        "release_manager": {"temperature": 0.2},
-    },
-    "strict": {
-        "architect": {"temperature": 0.1},
-        "implementer": {"temperature": 0.05},
-        "adversarial_reviewer": {"temperature": 0.6},
-        "security_auditor": {"temperature": 0.1},
-        "test_generator": {"temperature": 0.1},
-        "performance_analyst": {"temperature": 0.1},
-        "documentation_writer": {"temperature": 0.15},
-        "devops_sre": {"temperature": 0.1},
-        "database_engineer": {"temperature": 0.1},
-        "release_manager": {"temperature": 0.1},
-    },
-    "paranoid": {
-        "architect": {"temperature": 0.1},
-        "implementer": {"temperature": 0.05},
-        "adversarial_reviewer": {"temperature": 0.8},
-        "security_auditor": {"temperature": 0.1},
-        "test_generator": {"temperature": 0.1},
-        "performance_analyst": {"temperature": 0.1},
-        "documentation_writer": {"temperature": 0.15},
-        "devops_sre": {"temperature": 0.1},
-        "database_engineer": {"temperature": 0.1},
-        "release_manager": {"temperature": 0.1},
-    },
-}
+
+class WizardCanceled(RuntimeError):
+    """Raised when the interactive wizard is canceled."""
 
 
 def _provider_choices(*, advanced: bool) -> list[questionary.Choice]:
@@ -330,6 +155,27 @@ def _validate_adapter_reference(value: str | None) -> bool | str:
     return "Enter adapter reference in 'module:function' format."
 
 
+def _required_answer(value: T | None) -> T:
+    if value is None:
+        raise WizardCanceled("setup canceled")
+    return value
+
+
+def _ask_text(message: str, **kwargs: Any) -> str:
+    return _required_answer(questionary.text(message, **kwargs).ask())
+
+
+def _ask_select(message: str, *, choices: list[Any], default: Any | None = None) -> str:
+    options: dict[str, Any] = {"choices": choices}
+    if default is not None:
+        options["default"] = default
+    return _required_answer(questionary.select(message, **options).ask())
+
+
+def _ask_confirm(message: str, *, default: bool) -> bool:
+    return bool(_required_answer(questionary.confirm(message, default=default).ask()))
+
+
 def _resolve_model_alias(provider: str, model_name: str) -> str:
     raw = (model_name or "").strip()
     if not raw:
@@ -342,7 +188,7 @@ def _input_model_id(provider: str, prompt: str) -> str:
     alias_help = ", ".join(sorted(MODEL_ALIASES_BY_PROVIDER.get(provider, {}).keys()))
     if alias_help:
         prompt = f"{prompt} (aliases: {alias_help})"
-    typed = questionary.text(prompt).ask()
+    typed = _ask_text(prompt)
     return _resolve_model_alias(provider, typed)
 
 
@@ -363,18 +209,18 @@ def _select_default_model(provider: str, goal_profile: str | None = None) -> str
         choices = [recommended_label, COMMON_MODEL_CHOICE, CUSTOM_OR_ALIAS_MODEL_CHOICE]
         default = recommended_label
 
-    model_choice = questionary.select(
+    model_choice = _ask_select(
         "Default model:",
         choices=choices,
         default=default,
-    ).ask()
+    )
 
     if model_choice == COMMON_MODEL_CHOICE:
-        return questionary.select(
+        return _ask_select(
             "Choose common model:",
             choices=common_models,
             default=recommended if recommended in common_models else common_models[0],
-        ).ask()
+        )
 
     if isinstance(model_choice, str) and model_choice.startswith(f"{RECOMMENDED_MODEL_CHOICE} (") and model_choice.endswith(")"):
         return model_choice[len(RECOMMENDED_MODEL_CHOICE) + 2 : -1]
@@ -398,28 +244,28 @@ def _select_role_model_override(
     recommended_choice = f"{ROLE_RECOMMENDED_MODEL_CHOICE} ({recommended})" if recommended else None
 
     choices: list[str] = [inherit_choice]
-    if recommended and recommended != default_model:
+    if recommended_choice and recommended != default_model:
         choices.append(recommended_choice)
     if common_models:
         choices.append(ROLE_COMMON_MODEL_CHOICE)
     choices.append(ROLE_CUSTOM_MODEL_CHOICE)
 
-    selected = questionary.select(
+    selected = _ask_select(
         f"Model for role '{role}':",
         choices=choices,
         default=inherit_choice,
-    ).ask()
+    )
 
     if selected in {default_model, inherit_choice}:
         return None
 
     if selected == ROLE_COMMON_MODEL_CHOICE:
         available_models = [model for model in common_models if model != default_model] or common_models
-        return questionary.select(
+        return _ask_select(
             f"Choose common model for role '{role}':",
             choices=available_models,
             default=recommended if recommended in available_models else available_models[0],
-        ).ask()
+        )
 
     if selected == ROLE_CUSTOM_MODEL_CHOICE:
         return _input_model_id(provider, f"Custom model id for role '{role}':")
@@ -438,7 +284,7 @@ def _apply_advanced_role_model_overrides(
     default_model: str,
     goal_profile: str | None = None,
 ) -> None:
-    if not questionary.confirm("Customize models for individual roles?", default=False).ask():
+    if not _ask_confirm("Customize models for individual roles?", default=False):
         return
 
     for role in selected_roles:
@@ -498,11 +344,11 @@ def _select_execution_mode(provider: str, *, advanced: bool) -> str:
     if not supports_live:
         default_mode = DEMO_EXECUTION_MODE
 
-    return questionary.select(
+    return _ask_select(
         "Execution mode:",
         choices=choices,
         default=default_mode,
-    ).ask()
+    )
 
 
 def _resolve_runtime_adapter(
@@ -519,10 +365,10 @@ def _resolve_runtime_adapter(
             return builtin_adapter
         if not advanced:
             return "dry-run"
-    return questionary.text(
+    return _ask_text(
         "Custom adapter reference (module:function):",
         validate=_validate_adapter_reference,
-    ).ask()
+    )
 
 
 def _role_choices() -> list[questionary.Choice]:
@@ -541,50 +387,42 @@ def _ordered_selected_roles(selected_roles: list[str]) -> list[str]:
     return [role for role in ROLE_DESCRIPTIONS if role in selected]
 
 
-def _config_type_choices() -> list[questionary.Choice]:
-    return [
+def _config_type_choices(*, has_packs: bool) -> list[questionary.Choice]:
+    choices = [
         questionary.Choice(
             title="framework - define your own role names and responsibilities",
             value=FRAMEWORK_CONFIG_TYPE,
         ),
-        questionary.Choice(
-            title="pack - use a shipped config pack with fixed roles",
-            value=PACK_CONFIG_TYPE,
-        ),
     ]
+    if has_packs:
+        choices.append(
+            questionary.Choice(
+                title="pack - use an installed config pack",
+                value=PACK_CONFIG_TYPE,
+            ),
+        )
+    return choices
 
 
-def _pack_choices() -> list[questionary.Choice]:
+def _pack_choices(packs: list[ConfigPackDefinition]) -> list[questionary.Choice]:
     return [
         questionary.Choice(title=f"{pack.title} - {pack.summary}", value=pack.key)
-        for pack in list_config_packs()
+        for pack in packs
     ]
 
 
 def _roles_for_preset(preset: str, selected_roles: list[str]) -> Dict[str, Dict[str, Any]]:
-    defaults = ROLE_DEFAULTS_BY_PRESET.get(preset, {})
-    return {role: dict(defaults.get(role, {"temperature": 0.2})) for role in selected_roles}
+    return _framework_roles_for_preset(preset, selected_roles)
 
 
 def _build_pack_roles_cfg(pack: ConfigPackDefinition) -> Dict[str, Dict[str, Any]]:
     return {
         role.key: {
             "temperature": role.temperature,
-            "responsibility": role.responsibility,
             "prompt": role.prompt,
         }
         for role in pack.roles
     }
-
-
-def _ensemble_constraints(selected_roles: list[str]) -> Dict[str, Any]:
-    selected = set(selected_roles)
-    pairs = [
-        [left, right]
-        for left, right in DEFAULT_DISALLOW_SAME_MODEL_PAIRS
-        if left in selected and right in selected
-    ]
-    return {"disallow_same_model_pairs": pairs}
 
 
 def _preview_config(cfg: Dict[str, Any]) -> None:
@@ -645,24 +483,24 @@ def _render_framework_role_review(
 
 def _collect_framework_roles(*, scope: str) -> tuple[Dict[str, Dict[str, Any]], list[str]]:
     role_count = int(
-        questionary.text(
+        _ask_text(
             "How many ensemble members should this framework config start with?",
             default="3",
             validate=_validate_positive_int_text("Role count"),
-        ).ask(),
+        ),
     )
 
     role_inputs: list[FrameworkRoleInput] = []
     for index in range(role_count):
         role_number = index + 1
-        role_name = questionary.text(
+        role_name = _ask_text(
             f"Role {role_number} name:",
             validate=_validate_non_empty_text(f"Role {role_number} name"),
-        ).ask()
-        responsibility = questionary.text(
+        )
+        responsibility = _ask_text(
             f"What does '{role_name}' own?",
             validate=_validate_non_empty_text(f"Responsibility for {role_name}"),
-        ).ask()
+        )
         role_inputs.append(
             FrameworkRoleInput(
                 name=role_name,
@@ -682,118 +520,79 @@ def _collect_framework_roles(*, scope: str) -> tuple[Dict[str, Dict[str, Any]], 
         role_order.append(draft.key)
         role_cfg: Dict[str, Any] = {
             "temperature": 0.2,
-            "responsibility": draft.responsibility,
             "prompt": draft.prompt,
-            "display_name": draft.name,
         }
-        if normalize_role_key(draft.name) != draft.key:
-            role_cfg["normalized_from"] = draft.name
         roles_cfg[draft.key] = role_cfg
     return roles_cfg, role_order
 
 
-def _apply_simple_mode_model_diversity(
-    cfg: Dict[str, Any],
-    *,
-    provider: str,
-    selected_roles: list[str],
-) -> None:
-    common_models = COMMON_MODELS_BY_PROVIDER.get(provider, [])
-    if len(common_models) < 2:
-        return
-
-    provider_cfg = cfg.get("provider") or {}
-    base_model = provider_cfg.get("model")
-    alternatives = [model for model in common_models if model != base_model]
-    if not alternatives:
-        return
-
-    roles_cfg = cfg.get("roles") or {}
-    if not isinstance(roles_cfg, dict):
-        return
-
-    assigned_models: dict[str, str] = {
-        role: str((role_cfg or {}).get("model") or base_model)
-        for role, role_cfg in roles_cfg.items()
-    }
-
-    def assign_distinct(role: str, *, disallow_with: list[str]) -> None:
-        if role not in selected_roles:
-            return
-        banned = {
-            assigned_models.get(other)
-            for other in disallow_with
-            if assigned_models.get(other)
-        }
-        for candidate in alternatives:
-            if candidate not in banned:
-                role_cfg = roles_cfg.get(role) or {}
-                role_cfg["model"] = candidate
-                roles_cfg[role] = role_cfg
-                assigned_models[role] = candidate
-                return
-
-    assign_distinct("implementer", disallow_with=["architect"])
-    assign_distinct("adversarial_reviewer", disallow_with=["implementer", "security_auditor"])
-    assign_distinct("security_auditor", disallow_with=["implementer", "adversarial_reviewer"])
-    assign_distinct("release_manager", disallow_with=["implementer"])
-    cfg["roles"] = roles_cfg
-
-
 def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) -> str | None:
     while True:
-        mode = questionary.select("Setup mode:", choices=["ensemble", "solo"]).ask()
-        provider = questionary.select(
-            "Provider:",
-            choices=_provider_choices(advanced=advanced),
-            default=_provider_default_from_env(),
-        ).ask()
-        execution_mode = _select_execution_mode(provider, advanced=advanced)
-        config_type = questionary.select(
-            "Configuration source:",
-            choices=_config_type_choices(),
-            default=FRAMEWORK_CONFIG_TYPE,
-        ).ask()
+        try:
+            available_packs = list_config_packs()
+            mode = _ask_select("Setup mode:", choices=["ensemble", "solo"])
+            provider = _ask_select(
+                "Provider:",
+                choices=_provider_choices(advanced=advanced),
+                default=_provider_default_from_env(),
+            )
+            execution_mode = _select_execution_mode(provider, advanced=advanced)
+            config_type = FRAMEWORK_CONFIG_TYPE
+            if available_packs:
+                config_type = _ask_select(
+                    "Configuration source:",
+                    choices=_config_type_choices(has_packs=True),
+                    default=FRAMEWORK_CONFIG_TYPE,
+                )
+        except WizardCanceled:
+            return None
 
         provider_name = provider
         provider_cfg: Dict[str, Any] = {}
 
         if provider == "custom_api":
-            provider_name = questionary.text(
-                "Custom provider name (e.g., my-gateway):",
-                validate=_validate_non_empty_text("Provider name"),
-            ).ask()
+            try:
+                provider_name = _ask_text(
+                    "Custom provider name (e.g., my-gateway):",
+                    validate=_validate_non_empty_text("Provider name"),
+                )
+            except WizardCanceled:
+                return None
 
         selected_pack: ConfigPackDefinition | None = None
         goal_profile = None
         preset: str
-        if config_type == PACK_CONFIG_TYPE:
-            selected_pack = get_config_pack(
-                questionary.select(
-                    "Installed pack:",
-                    choices=_pack_choices(),
-                ).ask(),
-            )
-            goal_profile = selected_pack.goal_profile
-            preset = selected_pack.preset
-        elif advanced:
-            preset = questionary.select(
-                "Preset:", choices=["fast", "balanced", "strict", "paranoid"],
-            ).ask()
-            goal_profile = PRESET_TO_GOAL_PROFILE.get(preset)
-        else:
-            goal_profile = questionary.select(
-                "Goal profile:",
-                choices=GOAL_PROFILES,
-                default="balanced",
-            ).ask()
-            preset = GOAL_TO_PRESET[goal_profile]
+        try:
+            if config_type == PACK_CONFIG_TYPE:
+                selected_pack = get_config_pack(
+                    _ask_select(
+                        "Installed pack:",
+                        choices=_pack_choices(available_packs),
+                    ),
+                )
+                goal_profile = selected_pack.goal_profile
+                preset = selected_pack.preset
+            elif advanced:
+                preset = _ask_select(
+                    "Preset:",
+                    choices=["fast", "balanced", "strict", "paranoid"],
+                )
+                goal_profile = PRESET_TO_GOAL_PROFILE.get(preset)
+            else:
+                goal_profile = _ask_select(
+                    "Goal profile:",
+                    choices=GOAL_PROFILES,
+                    default="balanced",
+                )
+                preset = GOAL_TO_PRESET[goal_profile]
 
-        scope = questionary.text(
-            "Project scope or task for this ensemble run:",
-            validate=_validate_non_empty_text("Project scope"),
-        ).ask()
-        model = _select_default_model(provider=provider, goal_profile=goal_profile)
+            scope = _ask_text(
+                "Project scope or task for this ensemble run:",
+                validate=_validate_non_empty_text("Project scope"),
+            )
+            model = _select_default_model(provider=provider, goal_profile=goal_profile)
+        except WizardCanceled:
+            return None
 
         selected_roles: list[str]
         role_order: list[str]
@@ -819,36 +618,39 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
             advanced=advanced,
         )
 
-        api_key_env = None
-        if runtime_adapter in {"openai", "custom_api"}:
-            api_key_env = questionary.text(
-                "API key environment variable:",
-                default=_default_api_key_env(provider),
-                validate=_validate_non_empty_text("API key environment variable"),
-            ).ask()
-        if runtime_adapter == "local":
-            local_base_url = questionary.text(
-                "Local base URL (default Ollama OpenAI-compatible endpoint):",
-                default="http://localhost:11434/v1",
-                validate=_validate_non_empty_text("Local base URL"),
-            ).ask()
-            provider_cfg["base_url"] = local_base_url.strip()
-        if runtime_adapter == "custom_api":
-            custom_base_url = questionary.text(
-                "Custom API base URL (required, e.g., https://gateway.example/v1):",
-                validate=_validate_non_empty_text("Base URL"),
-            ).ask()
-            provider_cfg["base_url"] = custom_base_url.strip()
+        try:
+            api_key_env = None
+            if runtime_adapter in {"openai", "custom_api"}:
+                api_key_env = _ask_text(
+                    "API key environment variable:",
+                    default=_default_api_key_env(provider),
+                    validate=_validate_non_empty_text("API key environment variable"),
+                )
+            if runtime_adapter == "local":
+                local_base_url = _ask_text(
+                    "Local base URL (default Ollama OpenAI-compatible endpoint):",
+                    default="http://localhost:11434/v1",
+                    validate=_validate_non_empty_text("Local base URL"),
+                )
+                provider_cfg["base_url"] = local_base_url.strip()
+            if runtime_adapter == "custom_api":
+                custom_base_url = _ask_text(
+                    "Custom API base URL (required, e.g., https://gateway.example/v1):",
+                    validate=_validate_non_empty_text("Base URL"),
+                )
+                provider_cfg["base_url"] = custom_base_url.strip()
 
-        enforce_json = questionary.confirm(
-            "Enforce JSON-only outputs for role reports?",
-            default=True,
-        ).ask()
+            enforce_json = _ask_confirm(
+                "Enforce JSON-only outputs for role reports?",
+                default=True,
+            )
 
-        fail_on_high = questionary.confirm(
-            "Fail pipeline on HIGH severity findings?",
-            default=True,
-        ).ask()
+            fail_on_high = _ask_confirm(
+                "Fail pipeline on HIGH severity findings?",
+                default=True,
+            )
+        except WizardCanceled:
+            return None
 
         cfg: Dict[str, Any] = {
             "version": 1,
@@ -913,14 +715,20 @@ def run_wizard(config_path: str = "ese.config.yaml", *, advanced: bool = False) 
             validated_cfg = validate_config(cfg, source=config_path)
         except ConfigValidationError as err:
             questionary.print(f"\nConfiguration error:\n  {err}\n")
-            if not questionary.confirm("Restart setup?", default=True).ask():
+            try:
+                if not _ask_confirm("Restart setup?", default=True):
+                    return None
+            except WizardCanceled:
                 return None
             continue
 
         _preview_config(validated_cfg)
-        if questionary.confirm("Write this config?", default=True).ask():
-            write_config(config_path, validated_cfg)
-            return config_path
+        try:
+            if _ask_confirm("Write this config?", default=True):
+                write_config(config_path, validated_cfg)
+                return config_path
 
-        if not questionary.confirm("Restart setup?", default=True).ask():
+            if not _ask_confirm("Restart setup?", default=True):
+                return None
+        except WizardCanceled:
             return None

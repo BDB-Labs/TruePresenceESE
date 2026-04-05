@@ -8,6 +8,8 @@ from typing import Any
 
 from ese.diff_context import build_file_aware_diff_excerpt
 
+MAX_UNTRACKED_PREVIEW_CHARS = 1200
+
 
 class RepoContextError(ValueError):
     """Raised when repository context cannot be assembled."""
@@ -60,12 +62,18 @@ def build_repo_context(
     max_diff_chars: int = 8000,
 ) -> dict[str, Any]:
     """Collect lightweight repo context for a task-oriented run."""
-    repo_root = str(Path(_git(repo_path, "rev-parse", "--show-toplevel")))
+    repo_root_path = Path(_git(repo_path, "rev-parse", "--show-toplevel"))
+    repo_root = str(repo_root_path)
     branch = _git(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
     status = _git(repo_root, "status", "--short") if include_status else ""
     diffstat = _git(repo_root, "diff", "--stat", "--find-renames", "HEAD") if include_diff else ""
     changed_files = _git(repo_root, "diff", "--name-status", "--find-renames", "HEAD") if include_diff else ""
     patch_raw = _git(repo_root, "diff", "--no-color", "--find-renames", "HEAD") if include_diff else ""
+    untracked_files = (
+        [line for line in _git(repo_root, "ls-files", "--others", "--exclude-standard").splitlines() if line.strip()]
+        if include_diff
+        else []
+    )
     if include_diff and patch_raw:
         patch, patch_truncated, included_patch_files, total_patch_files = _truncate(
             patch_raw,
@@ -73,6 +81,26 @@ def build_repo_context(
         )
     else:
         patch, patch_truncated, included_patch_files, total_patch_files = "", False, 0, 0
+
+    untracked_previews: dict[str, str] = {}
+    remaining_chars = max(0, max_diff_chars - len(patch))
+    if include_diff and untracked_files and remaining_chars > 0:
+        for relative_path in untracked_files:
+            if remaining_chars <= 0:
+                break
+            file_path = repo_root_path / relative_path
+            if not file_path.is_file():
+                continue
+            try:
+                preview = file_path.read_text(encoding="utf-8", errors="ignore").strip()
+            except OSError:
+                continue
+            if not preview:
+                continue
+            preview = preview[: min(remaining_chars, MAX_UNTRACKED_PREVIEW_CHARS)]
+            untracked_previews[relative_path] = preview
+            remaining_chars -= len(preview)
+
     return {
         "repo_path": repo_root,
         "branch": branch,
@@ -84,6 +112,8 @@ def build_repo_context(
         "included_patch_files": included_patch_files,
         "total_patch_files": total_patch_files,
         "max_diff_chars": max_diff_chars,
+        "untracked_files": untracked_files,
+        "untracked_previews": untracked_previews,
     }
 
 
@@ -98,12 +128,18 @@ def render_repo_context(context: dict[str, Any]) -> str:
     changed_files = str(context.get("changed_files") or "").strip()
     diffstat = str(context.get("diffstat") or "").strip()
     patch = str(context.get("patch") or "").strip()
+    untracked_files = [item for item in context.get("untracked_files", []) if isinstance(item, str) and item.strip()]
+    raw_previews = context.get("untracked_previews")
+    untracked_previews = raw_previews if isinstance(raw_previews, dict) else {}
     if status:
         lines.extend(["", "Git status:", status])
     if diffstat:
         lines.extend(["", "Diffstat:", diffstat])
     if changed_files:
         lines.extend(["", "Changed files:", changed_files])
+    if untracked_files:
+        lines.extend(["", "Untracked files:"])
+        lines.extend(f"- {path}" for path in untracked_files)
     if patch:
         header = "Unified diff:"
         if bool(context.get("patch_truncated")):
@@ -114,4 +150,8 @@ def render_repo_context(context: dict[str, Any]) -> str:
                 f"included {included} of {total} file patches):"
             )
         lines.extend(["", header, patch])
+    for path in untracked_files:
+        preview = str(untracked_previews.get(path) or "").strip()
+        if preview:
+            lines.extend(["", f"Untracked file preview: {path}", preview])
     return "\n".join(lines).strip()

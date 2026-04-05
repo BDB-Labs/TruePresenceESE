@@ -84,6 +84,7 @@ def test_build_task_config_includes_repo_context(tmp_path: Path) -> None:
     repo.mkdir()
     _init_repo(repo)
     (repo / "app.py").write_text("print('hello pluralism')\n", encoding="utf-8")
+    (repo / "notes.md").write_text("deployment checklist draft\n", encoding="utf-8")
 
     cfg = build_task_config(
         scope="Review a local worktree change",
@@ -98,3 +99,5 @@ def test_build_task_config_includes_repo_context(tmp_path: Path) -> None:
     assert "Repository context for this task run" in cfg["input"]["prompt"]
     assert repo_context["repo_path"] == str(repo.resolve())
     assert "app.py" in repo_context["changed_files"]
+    assert "notes.md" in repo_context["untracked_files"]
+    assert "deployment checklist draft" in cfg["input"]["prompt"]

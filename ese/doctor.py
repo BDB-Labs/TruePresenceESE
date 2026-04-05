@@ -67,7 +67,7 @@ def _normalize_role_pair(pair: Any, *, label: str) -> tuple[str, str]:
         raise ValueError(f"{label} entries must be non-empty strings")
     if clean_left == clean_right:
         return clean_left, clean_right
-    return tuple(sorted((clean_left, clean_right)))
+    return (clean_left, clean_right) if clean_left < clean_right else (clean_right, clean_left)
 
 
 def _constraint_pairs(

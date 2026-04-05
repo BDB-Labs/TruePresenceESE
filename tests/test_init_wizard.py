@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
+from ese.config_packs import ConfigPackDefinition, PackRoleDefinition
 from ese.init_wizard import (
     LIVE_EXECUTION_MODE,
     _apply_simple_mode_model_diversity,
@@ -22,7 +24,7 @@ class _FakePrompt:
         return self._answer
 
 
-def _patch_questionary(monkeypatch, *, selects, texts, confirms, checkboxes=None) -> None:
+def _patch_questionary(monkeypatch, *, selects, texts, confirms, checkboxes=None, packs=None) -> None:
     select_answers = iter(selects)
     text_answers = iter(texts)
     confirm_answers = iter(confirms)
@@ -33,6 +35,7 @@ def _patch_questionary(monkeypatch, *, selects, texts, confirms, checkboxes=None
     monkeypatch.setattr("ese.init_wizard.questionary.confirm", lambda *args, **kwargs: _FakePrompt(next(confirm_answers)))
     monkeypatch.setattr("ese.init_wizard.questionary.checkbox", lambda *args, **kwargs: _FakePrompt(next(checkbox_answers)))
     monkeypatch.setattr("ese.init_wizard.questionary.print", lambda *args, **kwargs: None)
+    monkeypatch.setattr("ese.init_wizard.list_config_packs", lambda: list(packs or []))
 
 
 def test_ensemble_constraints_filters_to_selected_roles() -> None:
@@ -45,7 +48,7 @@ def test_ensemble_constraints_filters_to_selected_roles() -> None:
 
 
 def test_simple_mode_model_diversity_overrides_implementer() -> None:
-    cfg = {
+    cfg: dict[str, Any] = {
         "provider": {"name": "openai", "model": "gpt-5"},
         "roles": {
             "architect": {},
@@ -59,7 +62,9 @@ def test_simple_mode_model_diversity_overrides_implementer() -> None:
         selected_roles=["architect", "implementer"],
     )
 
-    assert cfg["roles"]["implementer"]["model"] != "gpt-5"
+    implementer_cfg = cfg["roles"]["implementer"]
+    assert isinstance(implementer_cfg, dict)
+    assert implementer_cfg["model"] != "gpt-5"
 
 
 def test_provider_default_from_env_prefers_local_without_hosted_credentials(monkeypatch) -> None:
@@ -101,7 +106,6 @@ def test_run_wizard_writes_scope_and_demo_config(tmp_path: Path, monkeypatch) ->
             "ensemble",
             "anthropic",
             "demo",
-            "framework",
             "balanced",
             "recommended (claude-sonnet-4)",
         ],
@@ -119,7 +123,7 @@ def test_run_wizard_writes_scope_and_demo_config(tmp_path: Path, monkeypatch) ->
     written = run_wizard(str(config_path), advanced=False)
 
     assert written == str(config_path)
-    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    cfg = cast(dict[str, Any], yaml.safe_load(config_path.read_text(encoding="utf-8")))
     assert cfg["input"]["scope"] == "Document the deployment workflow for the new auth system"
     assert cfg["runtime"]["adapter"] == "dry-run"
     assert cfg["install_profile"]["kind"] == "framework"
@@ -135,7 +139,6 @@ def test_run_wizard_rejects_invalid_custom_adapter_before_write(tmp_path: Path, 
             "ensemble",
             "openai",
             "custom_module",
-            "framework",
             "fast",
             "recommended (gpt-5-mini)",
         ],
@@ -165,7 +168,6 @@ def test_run_wizard_advanced_supports_per_role_model_overrides(tmp_path: Path, m
             "ensemble",
             "openai",
             "demo",
-            "framework",
             "fast",
             "recommended (gpt-5-mini)",
             "inherit global default (gpt-5-mini)",
@@ -186,7 +188,7 @@ def test_run_wizard_advanced_supports_per_role_model_overrides(tmp_path: Path, m
     written = run_wizard(str(config_path), advanced=True)
 
     assert written == str(config_path)
-    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    cfg = cast(dict[str, Any], yaml.safe_load(config_path.read_text(encoding="utf-8")))
     assert cfg["provider"]["model"] == "gpt-5-mini"
     assert cfg["roles"]["design_critic"].get("model") is None
     assert cfg["roles"]["verification_lead"]["model"] == "gpt-5"
@@ -195,6 +197,29 @@ def test_run_wizard_advanced_supports_per_role_model_overrides(tmp_path: Path, m
 
 def test_run_wizard_pack_config_uses_fixed_pack_roles(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "ese.config.yaml"
+    pack = ConfigPackDefinition(
+        key="release-ops",
+        title="Release Operations",
+        summary="Reusable release-review pack",
+        preset="strict",
+        goal_profile="high-quality",
+        roles=(
+            PackRoleDefinition(
+                key="release_planner",
+                responsibility="Plan release sequencing.",
+                prompt="Plan the release sequence and required checkpoints.",
+            ),
+            PackRoleDefinition(
+                key="release_reviewer",
+                responsibility="Review rollout and rollback readiness.",
+                prompt="Review rollout and rollback readiness.",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "ese.init_wizard.get_config_pack",
+        lambda key: pack if key == pack.key else (_ for _ in ()).throw(KeyError(key)),
+    )
     _patch_questionary(
         monkeypatch,
         selects=[
@@ -202,20 +227,21 @@ def test_run_wizard_pack_config_uses_fixed_pack_roles(tmp_path: Path, monkeypatc
             "openai",
             "demo",
             "pack",
-            "construction-contract-intelligence",
+            "release-ops",
             "recommended (gpt-5)",
         ],
         texts=[
-            "Review the Riverside Bridge bid package before deciding whether to pursue it",
+            "Review the production rollout plan before approval",
         ],
         confirms=[True, True, True],
+        packs=[pack],
     )
 
     written = run_wizard(str(config_path), advanced=False)
 
     assert written == str(config_path)
-    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    cfg = cast(dict[str, Any], yaml.safe_load(config_path.read_text(encoding="utf-8")))
     assert cfg["install_profile"]["kind"] == "pack"
-    assert cfg["install_profile"]["pack"] == "construction-contract-intelligence"
-    assert cfg["role_order"][0] == "document_intake_analyst"
-    assert "bid_decision_analyst" in cfg["roles"]
+    assert cfg["install_profile"]["pack"] == "release-ops"
+    assert cfg["role_order"][0] == "release_planner"
+    assert "release_reviewer" in cfg["roles"]

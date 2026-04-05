@@ -10,7 +10,7 @@ import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Protocol
+from typing import Any, Callable, Dict, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 import yaml
@@ -971,7 +971,7 @@ def _persist_run_outputs(
 def _maybe_gate_pipeline(
     *,
     fail_on_high: bool,
-    results: list[Mapping[str, Any]],
+    results: Sequence[Mapping[str, Any]],
     artifacts_dir: str,
     run_id: str,
     assurance_level: str,
