@@ -8,6 +8,7 @@ from importlib import metadata
 from typing import Any
 
 CONFIG_PACK_ENTRY_POINT_GROUP = "ese.config_packs"
+CONFIG_PACK_CONTRACT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class ConfigPackDefinition:
     preset: str
     goal_profile: str
     roles: tuple[PackRoleDefinition, ...]
+    contract_version: int = CONFIG_PACK_CONTRACT_VERSION
 
 
 def _config_pack_entry_points() -> list[Any]:
@@ -41,6 +43,19 @@ def _normalize_non_empty(value: Any, *, label: str) -> str:
     return value.strip()
 
 
+def _normalize_contract_version(value: Any) -> int:
+    if value is None:
+        return CONFIG_PACK_CONTRACT_VERSION
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("config pack contract_version must be an integer")
+    if value != CONFIG_PACK_CONTRACT_VERSION:
+        raise ValueError(
+            "config pack contract_version "
+            f"{value} is not supported by this ESE build; expected {CONFIG_PACK_CONTRACT_VERSION}"
+        )
+    return value
+
+
 def _normalize_role_definition(value: Any) -> PackRoleDefinition:
     if isinstance(value, PackRoleDefinition):
         return value
@@ -54,38 +69,56 @@ def _normalize_role_definition(value: Any) -> PackRoleDefinition:
     )
 
 
-def _normalize_pack_definition(value: Any) -> ConfigPackDefinition:
+def normalize_config_pack_definition(value: Any) -> ConfigPackDefinition:
     if isinstance(value, ConfigPackDefinition):
-        return value
-    if not isinstance(value, Mapping):
+        roles = value.roles
+        contract_version = value.contract_version
+        payload: Mapping[str, Any] = {
+            "key": value.key,
+            "title": value.title,
+            "summary": value.summary,
+            "preset": value.preset,
+            "goal_profile": value.goal_profile,
+            "roles": roles,
+            "contract_version": contract_version,
+        }
+    elif isinstance(value, Mapping):
+        payload = value
+    else:
         raise TypeError("Config pack providers must return ConfigPackDefinition instances or mappings")
 
-    roles = value.get("roles")
-    if not isinstance(roles, Iterable) or isinstance(roles, (str, bytes)):
+    raw_roles = payload.get("roles")
+    if not isinstance(raw_roles, Iterable) or isinstance(raw_roles, (str, bytes)):
         raise ValueError("config pack roles must be an iterable of role definitions")
 
-    normalized_roles = tuple(_normalize_role_definition(role) for role in roles)
+    normalized_roles = tuple(_normalize_role_definition(role) for role in raw_roles)
     if not normalized_roles:
         raise ValueError("config pack roles must not be empty")
+    seen_role_keys: set[str] = set()
+    for role in normalized_roles:
+        if role.key in seen_role_keys:
+            raise ValueError(f"config pack roles contain duplicate key '{role.key}'")
+        seen_role_keys.add(role.key)
 
     return ConfigPackDefinition(
-        key=_normalize_non_empty(value.get("key"), label="config pack key").lower(),
-        title=_normalize_non_empty(value.get("title"), label="config pack title"),
-        summary=_normalize_non_empty(value.get("summary"), label="config pack summary"),
-        preset=_normalize_non_empty(value.get("preset"), label="config pack preset"),
-        goal_profile=_normalize_non_empty(value.get("goal_profile"), label="config pack goal profile"),
+        key=_normalize_non_empty(payload.get("key"), label="config pack key").lower(),
+        title=_normalize_non_empty(payload.get("title"), label="config pack title"),
+        summary=_normalize_non_empty(payload.get("summary"), label="config pack summary"),
+        preset=_normalize_non_empty(payload.get("preset"), label="config pack preset"),
+        goal_profile=_normalize_non_empty(payload.get("goal_profile"), label="config pack goal profile"),
         roles=normalized_roles,
+        contract_version=_normalize_contract_version(payload.get("contract_version")),
     )
 
 
 def _iter_loaded_pack_definitions(value: Any) -> Iterable[ConfigPackDefinition]:
     if isinstance(value, (ConfigPackDefinition, Mapping)):
-        yield _normalize_pack_definition(value)
+        yield normalize_config_pack_definition(value)
         return
 
     if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
         for item in value:
-            yield _normalize_pack_definition(item)
+            yield normalize_config_pack_definition(item)
         return
 
     raise TypeError("Config pack providers must return a pack definition or an iterable of definitions")

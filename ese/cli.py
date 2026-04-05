@@ -14,6 +14,12 @@ from ese.dashboard import serve_dashboard
 from ese.doctor import build_doctor_guidance, evaluate_doctor, run_doctor
 from ese.feedback import record_feedback as persist_feedback
 from ese.init_wizard import ROLE_DESCRIPTIONS, run_wizard
+from ese.pack_sdk import (
+    PackProjectError,
+    describe_pack_project,
+    scaffold_pack_project,
+    smoke_test_pack_project,
+)
 from ese.pipeline import CONFIG_SNAPSHOT_NAME, PipelineError, run_pipeline
 from ese.pr_review import (
     DEFAULT_MAX_DIFF_CHARS,
@@ -40,6 +46,8 @@ from ese.templates import (
 )
 
 app = typer.Typer(help="Ensemble Software Engineering (ESE) CLI")
+pack_app = typer.Typer(help="Scaffold and validate external ESE config packs")
+app.add_typer(pack_app, name="pack")
 
 
 def _launch_dashboard(
@@ -276,6 +284,88 @@ def list_packs():
     typer.echo("Installed config packs:")
     for pack in packs:
         typer.echo(f"  - {pack.key}: {pack.title} - {pack.summary}")
+
+
+@pack_app.command("init")
+def pack_init(
+    path: str = typer.Argument(..., help="Target directory for the external pack project"),
+    key: str = typer.Option("", help="Stable pack key. Defaults from the directory name."),
+    title: str | None = typer.Option(None, help="Human-friendly pack title"),
+    summary: str | None = typer.Option(None, help="One-line description for the pack"),
+    package_name: str | None = typer.Option(None, "--package", help="Python package name for the generated scaffold"),
+    preset: str = typer.Option("balanced", help="Framework preset used by the pack"),
+    goal_profile: str | None = typer.Option(None, help="Goal profile override. Defaults from the preset."),
+    force: bool = typer.Option(False, "--force", help="Allow writing into a non-empty target directory"),
+):
+    """Scaffold a portable external ESE pack project."""
+    target = Path(path).expanduser()
+    try:
+        project = scaffold_pack_project(
+            target,
+            pack_key=(key or "").strip() or target.name,
+            title=title,
+            summary=summary,
+            package_name=package_name,
+            preset=preset,
+            goal_profile=goal_profile,
+            force=force,
+        )
+    except PackProjectError as err:
+        typer.echo(f"❌ ESE pack init failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    typer.echo(
+        "✅ Scaffolded external pack "
+        f"'{project.pack.key}' at {target.resolve()} using contract v{project.contract_version}."
+    )
+
+
+@pack_app.command("validate")
+def pack_validate(
+    path: str = typer.Argument(".", help="Pack project directory or ese_pack.yaml manifest"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable validation metadata"),
+):
+    """Validate an external ESE pack manifest and prompt assets."""
+    try:
+        report = describe_pack_project(path)
+    except PackProjectError as err:
+        typer.echo(f"❌ ESE pack validate failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    if json_output:
+        typer.echo(json.dumps(report, indent=2))
+        return
+
+    typer.echo(
+        "✅ Pack valid: "
+        f"{report['pack_key']} ({report['role_count']} roles, contract v{report['contract_version']})"
+    )
+    typer.echo(f"Manifest: {report['manifest_path']}")
+
+
+@pack_app.command("test")
+def pack_test(
+    path: str = typer.Argument(".", help="Pack project directory or ese_pack.yaml manifest"),
+    provider: str = typer.Option("openai", help="Provider preset for the generated smoke-test config"),
+    model: str | None = typer.Option(None, help="Optional model override for the generated smoke-test config"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable smoke-test metadata"),
+):
+    """Generate and validate a smoke-test ESE config from an external pack."""
+    try:
+        report = smoke_test_pack_project(path, provider=provider, model=model)
+    except PackProjectError as err:
+        typer.echo(f"❌ ESE pack test failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    if json_output:
+        typer.echo(json.dumps(report, indent=2))
+        return
+
+    typer.echo(
+        "✅ Pack smoke test passed: "
+        f"{report['pack_key']} via {report['provider']} / {report['model']}"
+    )
+    typer.echo(f"Manifest: {report['manifest_path']}")
 
 
 @app.command()

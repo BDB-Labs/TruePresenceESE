@@ -1,0 +1,15 @@
+contract_version: 1
+key: release-ops
+title: Release Operations
+summary: External ESE pack for release readiness workflows.
+preset: strict
+goal_profile: high-quality
+roles:
+  - key: release_planner
+    responsibility: Plan the release sequence, checkpoints, and handoff expectations.
+    prompt_file: prompts/release_planner.md
+    temperature: 0.2
+  - key: release_reviewer
+    responsibility: Challenge rollout, rollback, and evidence gaps before approval.
+    prompt_file: prompts/release_reviewer.md
+    temperature: 0.2

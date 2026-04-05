@@ -249,6 +249,21 @@ ESE no longer carries domain applications in the core repository. Vertical produ
 
 Use `ese packs` to confirm what is installed in the current environment. When no packs are installed, the wizard stays in framework mode automatically.
 
+Scaffold a new external pack project:
+
+```bash
+ese pack init ../my-product-pack --key my-product --preset strict
+```
+
+Validate the pack manifest and prompt assets:
+
+```bash
+ese pack validate ../my-product-pack
+ese pack test ../my-product-pack
+```
+
+This repository now carries a portable example external pack in [`examples/release_ops_pack`](examples/release_ops_pack).
+
 ## Provider/model selection and adapters
 
 Wizard provider presets: `openai`, `anthropic`, `google`, `xai`, `openrouter`, `huggingface`, `local`, `custom_api`.

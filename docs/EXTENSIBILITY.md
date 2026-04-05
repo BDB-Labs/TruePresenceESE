@@ -2,6 +2,8 @@
 
 ESE should remain the orchestration substrate, not the vertical application.
 
+External packs target config-pack contract version `1`.
+
 ## Core boundary
 
 The `ese` package owns:
@@ -45,11 +47,55 @@ Each role exposes:
 - `prompt`
 - optional `temperature`
 
+## Pack SDK workflow
+
+Use the built-in SDK commands when creating a new external pack repository:
+
+```bash
+ese pack init ../my-pack --key my-pack --preset strict
+ese pack validate ../my-pack
+ese pack test ../my-pack
+```
+
+The scaffold writes a manifest-driven project layout:
+
+```text
+my-pack/
+  pyproject.toml
+  README.md
+  src/my_pack/
+    __init__.py
+    pack.py
+    ese_pack.yaml
+    prompts/
+      analyst.md
+      reviewer.md
+```
+
+`ese pack validate` checks the manifest, prompt assets, preset/goal compatibility, and role uniqueness.
+`ese pack test` also generates a dry-run ESE config from the pack and validates it against the core config contract.
+
+## Manifest shape
+
+```yaml
+contract_version: 1
+key: release-ops
+title: Release Operations
+summary: External ESE pack for release readiness workflows.
+preset: strict
+goal_profile: high-quality
+roles:
+  - key: release_planner
+    responsibility: Plan the release sequence, checkpoints, and handoff expectations.
+    prompt_file: prompts/release_planner.md
+    temperature: 0.2
+```
+
 ## Packaging example
 
 ```toml
 [project.entry-points."ese.config_packs"]
-release_ops = "my_product.packs:release_ops_pack"
+release_ops = "my_product_pack.pack:load_pack"
 ```
 
 ## Operating model

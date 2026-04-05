@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "release-ops-ese-pack"
+version = "0.1.0"
+description = "External ESE pack for release readiness workflows."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["ese-cli>=1.0.0"]
+
+[project.entry-points."ese.config_packs"]
+release_ops = "release_ops_pack.pack:load_pack"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"release_ops_pack" = ["ese_pack.yaml", "prompts/*.md"]
