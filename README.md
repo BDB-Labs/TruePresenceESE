@@ -1,6 +1,6 @@
 # Ensemble Software Engineering (ESE)
 
-ESE is a lightweight CLI framework for orchestrated AI ensembles. The core engine stays generic, while config packs can ship fixed role catalogs for specific domains.
+ESE is a lightweight CLI framework for orchestrated AI ensembles. The core engine stays generic, while installed config packs can contribute fixed role catalogs from external repositories.
 
 ## Core pipeline
 
@@ -85,10 +85,10 @@ ese init --advanced
 
 The wizard now asks for:
 - a real project scope/task,
-- whether you are creating a `framework` config or using a fixed `pack`,
 - whether this should be a `demo` config (`dry-run`, no API calls) or a `live` config,
 - provider/model defaults appropriate for that choice,
-- either custom framework roles with starter prompt suggestions and overlap warnings, or a fixed pack-defined role set,
+- custom framework roles with starter prompt suggestions and overlap warnings,
+- optionally, an installed external pack when one is available locally,
 - optional per-role model overrides in advanced mode.
 
 2. Validate configuration and ensemble constraints:
@@ -228,7 +228,7 @@ Each run now writes lineage and assurance metadata into `pipeline_state.json` an
 ## Framework role drafting
 
 Use `ese roles` to print the built-in starter role examples for framework installs.
-Use `ese packs` to list shipped config packs with fixed role catalogs.
+Use `ese packs` to list installed config packs discovered outside the ESE core package.
 
 - `architect`: System design, decomposition, and interface contracts.
 - `implementer`: Code changes and refactors.
@@ -242,6 +242,12 @@ Use `ese packs` to list shipped config packs with fixed role catalogs.
 - `release_manager`: Go/no-go risk assessment and rollout checks.
 
 Framework installs are not limited to those names. The wizard can now generate starter prompts for user-defined roles and warn when responsibilities overlap enough to weaken ensemble independence.
+
+## External Packs
+
+ESE no longer carries domain applications in the core repository. Vertical products should live in sibling repos and register packs through the `ese.config_packs` Python entry point group.
+
+Use `ese packs` to confirm what is installed in the current environment. When no packs are installed, the wizard stays in framework mode automatically.
 
 ## Provider/model selection and adapters
 
@@ -316,6 +322,7 @@ runtime:
 ## Contract documentation
 
 - Config schema + version policy: [`docs/CONFIG_CONTRACT.md`](docs/CONFIG_CONTRACT.md)
+- Extension and pack boundary: [`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md)
 - Role report JSON contract: [`docs/ROLE_REPORT_CONTRACT.md`](docs/ROLE_REPORT_CONTRACT.md)
 - Pipeline state and lineage contract: [`docs/PIPELINE_STATE.md`](docs/PIPELINE_STATE.md)
 - Release evidence guidance: [`docs/RELEASE.md`](docs/RELEASE.md)

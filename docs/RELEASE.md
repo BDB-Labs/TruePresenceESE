@@ -11,11 +11,11 @@
 Run locally:
 
 ```bash
-pip install -e . pytest ruff
-ruff check ese tests
-pytest -q
-ese doctor --config ese.config.yaml
-ese start --config ese.config.yaml --artifacts-dir artifacts
+uv sync --locked --extra dev
+uv run ruff check ese tests
+uv run pytest -q
+uv run ese doctor --config ese.config.yaml
+uv run ese start --config ese.config.yaml --artifacts-dir artifacts
 ```
 
 Treat `assurance_level: degraded` runs as lower-confidence evidence.
@@ -26,7 +26,7 @@ Solo or degraded runs should not be used as equivalent release sign-off evidence
 1. Create and push a release tag (for example `v1.0.0`).
 2. Publish a GitHub release from that tag.
 3. GitHub release event triggers `.github/workflows/pypi-publish.yml`.
-4. Workflow builds package and publishes to PyPI using `PYPI_API_TOKEN`.
+4. Workflow builds the package with `uv build` and publishes to PyPI using `PYPI_API_TOKEN`.
 
 ## Post-release smoke checks
 

@@ -7,6 +7,7 @@ import yaml
 from typer.testing import CliRunner
 
 from ese.cli import app, main
+from ese.config_packs import ConfigPackDefinition, PackRoleDefinition
 
 runner = CliRunner()
 
@@ -48,11 +49,38 @@ def test_roles_command_lists_known_role() -> None:
     assert "architect" in result.stdout
 
 
-def test_packs_command_lists_construction_pack() -> None:
+def test_packs_command_reports_when_no_packs_are_installed() -> None:
     result = runner.invoke(app, ["packs"])
 
     assert result.exit_code == 0
-    assert "construction-contract-intelligence" in result.stdout
+    assert "No config packs installed." in result.stdout
+
+
+def test_packs_command_lists_installed_packs(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.cli.list_config_packs",
+        lambda: [
+            ConfigPackDefinition(
+                key="release-ops",
+                title="Release Operations",
+                summary="Reusable release-review pack",
+                preset="strict",
+                goal_profile="high-quality",
+                roles=(
+                    PackRoleDefinition(
+                        key="release_planner",
+                        responsibility="Plan the release",
+                        prompt="Plan the release.",
+                    ),
+                ),
+            )
+        ],
+    )
+
+    result = runner.invoke(app, ["packs"])
+
+    assert result.exit_code == 0
+    assert "release-ops" in result.stdout
 
 
 def test_no_args_prints_help_when_non_interactive() -> None:
@@ -85,7 +113,7 @@ def test_no_args_launches_dashboard_when_interactive(monkeypatch) -> None:
     monkeypatch.setattr("ese.cli.sys.stdin", _InteractiveStream())
     monkeypatch.setattr("ese.cli.sys.stdout", _InteractiveStream())
 
-    main(_FakeContext())
+    main(_FakeContext())  # type: ignore[arg-type]
 
     assert calls == [{}]
 

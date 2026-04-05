@@ -7,13 +7,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from ese.config import ConfigValidationError, validate_config, write_config
-from ese.init_wizard import (
+from ese.framework_defaults import (
     COMMON_MODELS_BY_PROVIDER,
     GOAL_DEFAULT_ROLES,
     RECOMMENDED_MODEL_BY_PROVIDER_GOAL,
-    _apply_simple_mode_model_diversity,
-    _ensemble_constraints,
-    _roles_for_preset,
+    apply_simple_mode_model_diversity,
+    ensemble_constraints,
+    roles_for_preset,
 )
 from ese.pipeline import run_pipeline
 from ese.provider_runtime import (
@@ -276,7 +276,7 @@ def build_task_config(
     if base_url and clean_provider == "custom_api":
         provider_cfg["base_url"] = base_url.strip()
 
-    roles_cfg = _roles_for_preset(template.preset, list(template.roles))
+    roles_cfg = roles_for_preset(template.preset, list(template.roles))
 
     cfg: dict[str, Any] = {
         "version": 1,
@@ -319,8 +319,8 @@ def build_task_config(
         cfg["input"]["repo_context"] = repo_context_payload
 
     if template.mode == "ensemble":
-        cfg["constraints"] = _ensemble_constraints(selected_roles=list(template.roles))
-        _apply_simple_mode_model_diversity(
+        cfg["constraints"] = ensemble_constraints(selected_roles=list(template.roles))
+        apply_simple_mode_model_diversity(
             cfg,
             provider=clean_provider,
             selected_roles=list(template.roles),

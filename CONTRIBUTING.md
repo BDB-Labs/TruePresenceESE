@@ -17,17 +17,19 @@ Artifact upload is configured with `if: always()` for debugging failed or succes
 Run locally before opening a PR:
 
 ```bash
-pip install -e . pytest ruff
-ruff check ese tests
-pytest -q
+uv sync --locked --extra dev
+uv run ruff check ese tests
+uv run pytest -q
 ```
 
 For CLI smoke:
 
 ```bash
-ese doctor --config ese.config.yaml
-ese start --config ese.config.yaml --artifacts-dir artifacts
+uv run ese doctor --config ese.config.yaml
+uv run ese start --config ese.config.yaml --artifacts-dir artifacts
 ```
+
+CI is locked to `uv`. The published package remains pip-installable for end users.
 
 ## Contract-sensitive changes
 
