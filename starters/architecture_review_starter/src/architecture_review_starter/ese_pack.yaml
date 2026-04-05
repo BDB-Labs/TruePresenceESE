@@ -1,0 +1,15 @@
+contract_version: 1
+key: architecture-review
+title: Architecture Review
+summary: Starter pack for architecture review, migration planning, and interface decision workflows.
+preset: strict
+goal_profile: high-quality
+roles:
+  - key: architecture_analyst
+    responsibility: Analyze architectural options, trust boundaries, and migration constraints.
+    prompt_file: prompts/architecture_analyst.md
+    temperature: 0.2
+  - key: migration_reviewer
+    responsibility: Challenge the proposed design for migration risk, coupling, and rollback weakness.
+    prompt_file: prompts/migration_reviewer.md
+    temperature: 0.2

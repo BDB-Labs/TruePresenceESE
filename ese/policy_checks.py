@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any
 
+from ese.extension_contracts import (
+    normalize_contract_version,
+    normalize_non_empty,
+    title_from_key,
+)
+
 POLICY_CHECK_ENTRY_POINT_GROUP = "ese.policy_checks"
+POLICY_CHECK_CONTRACT_VERSION = 1
 POLICY_ERROR = "error"
 POLICY_WARNING = "warning"
 _POLICY_SEVERITIES = {POLICY_ERROR, POLICY_WARNING}
@@ -38,6 +45,7 @@ class PolicyCheckDefinition:
     title: str
     summary: str
     check: Callable[[PolicyCheckContext], Any]
+    contract_version: int = POLICY_CHECK_CONTRACT_VERSION
 
 
 @dataclass(frozen=True)
@@ -53,18 +61,8 @@ def _policy_check_entry_points() -> list[Any]:
     return list(discovered.get(POLICY_CHECK_ENTRY_POINT_GROUP, []))
 
 
-def _normalize_non_empty(value: Any, *, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be a non-empty string")
-    return value.strip()
-
-
-def _title_from_key(key: str) -> str:
-    return " ".join(part.capitalize() for part in key.replace("_", "-").split("-"))
-
-
 def _normalize_policy_severity(value: Any) -> str:
-    severity = _normalize_non_empty(value, label="policy severity").lower()
+    severity = normalize_non_empty(value, label="policy severity").lower()
     if severity not in _POLICY_SEVERITIES:
         choices = ", ".join(sorted(_POLICY_SEVERITIES))
         raise ValueError(f"policy severity must be one of: {choices}")
@@ -74,9 +72,9 @@ def _normalize_policy_severity(value: Any) -> str:
 def normalize_policy_check_message(value: Any, *, policy_key: str) -> PolicyCheckMessage:
     if isinstance(value, PolicyCheckMessage):
         return PolicyCheckMessage(
-            policy_key=_normalize_non_empty(value.policy_key, label="policy key"),
+            policy_key=normalize_non_empty(value.policy_key, label="policy key"),
             severity=_normalize_policy_severity(value.severity),
-            message=_normalize_non_empty(value.message, label="policy message"),
+            message=normalize_non_empty(value.message, label="policy message"),
             hint=str(value.hint).strip() if isinstance(value.hint, str) and value.hint.strip() else None,
         )
 
@@ -84,7 +82,7 @@ def normalize_policy_check_message(value: Any, *, policy_key: str) -> PolicyChec
         return PolicyCheckMessage(
             policy_key=policy_key,
             severity=POLICY_ERROR,
-            message=_normalize_non_empty(value, label="policy message"),
+            message=normalize_non_empty(value, label="policy message"),
         )
 
     if not isinstance(value, Mapping):
@@ -93,9 +91,9 @@ def normalize_policy_check_message(value: Any, *, policy_key: str) -> PolicyChec
     hint = value.get("hint")
     clean_hint = str(hint).strip() if isinstance(hint, str) and hint.strip() else None
     return PolicyCheckMessage(
-        policy_key=_normalize_non_empty(value.get("policy_key") or policy_key, label="policy key"),
+        policy_key=normalize_non_empty(value.get("policy_key") or policy_key, label="policy key"),
         severity=_normalize_policy_severity(value.get("severity", POLICY_ERROR)),
-        message=_normalize_non_empty(value.get("message"), label="policy message"),
+        message=normalize_non_empty(value.get("message"), label="policy message"),
         hint=clean_hint,
     )
 
@@ -121,15 +119,20 @@ def _normalize_policy_check_definition(value: Any, *, fallback_key: str) -> Poli
         if not callable(raw_check):
             raise TypeError("Policy check definitions must provide a callable 'check'")
         definition = PolicyCheckDefinition(
-            key=_normalize_non_empty(value.get("key") or fallback_key, label="policy key"),
-            title=_normalize_non_empty(value.get("title") or _title_from_key(fallback_key), label="policy title"),
-            summary=_normalize_non_empty(value.get("summary"), label="policy summary"),
+            key=normalize_non_empty(value.get("key") or fallback_key, label="policy key"),
+            title=normalize_non_empty(value.get("title") or title_from_key(fallback_key), label="policy title"),
+            summary=normalize_non_empty(value.get("summary"), label="policy summary"),
             check=raw_check,
+            contract_version=normalize_contract_version(
+                value.get("contract_version"),
+                extension_name="policy check",
+                expected_version=POLICY_CHECK_CONTRACT_VERSION,
+            ),
         )
     elif callable(value):
         definition = PolicyCheckDefinition(
             key=fallback_key,
-            title=_title_from_key(fallback_key),
+            title=title_from_key(fallback_key),
             summary=((value.__doc__ or "").strip() or f"External policy check '{fallback_key}'."),
             check=value,
         )
@@ -140,10 +143,15 @@ def _normalize_policy_check_definition(value: Any, *, fallback_key: str) -> Poli
         raise TypeError("Policy check definitions must provide a callable 'check'")
 
     return PolicyCheckDefinition(
-        key=_normalize_non_empty(definition.key, label="policy key"),
-        title=_normalize_non_empty(definition.title, label="policy title"),
-        summary=_normalize_non_empty(definition.summary, label="policy summary"),
+        key=normalize_non_empty(definition.key, label="policy key"),
+        title=normalize_non_empty(definition.title, label="policy title"),
+        summary=normalize_non_empty(definition.summary, label="policy summary"),
         check=definition.check,
+        contract_version=normalize_contract_version(
+            definition.contract_version,
+            extension_name="policy check",
+            expected_version=POLICY_CHECK_CONTRACT_VERSION,
+        ),
     )
 
 
@@ -151,7 +159,7 @@ def discover_policy_checks() -> tuple[list[PolicyCheckDefinition], list[PolicyCh
     checks_by_key: dict[str, PolicyCheckDefinition] = {}
     failures: list[PolicyCheckLoadFailure] = []
     for entry_point in _policy_check_entry_points():
-        entry_name = _normalize_non_empty(getattr(entry_point, "name", "policy-check"), label="entry point name")
+        entry_name = normalize_non_empty(getattr(entry_point, "name", "policy-check"), label="entry point name")
         fallback_key = entry_name.replace("_", "-").lower()
         try:
             loaded = entry_point.load()

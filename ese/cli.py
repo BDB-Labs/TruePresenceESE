@@ -13,8 +13,10 @@ from ese.config import ConfigValidationError, load_config, write_config
 from ese.config_packs import list_config_packs
 from ese.dashboard import serve_dashboard
 from ese.doctor import build_doctor_guidance, evaluate_doctor, run_doctor
+from ese.extensions import list_extension_surfaces
 from ese.feedback import record_feedback as persist_feedback
 from ese.init_wizard import ROLE_DESCRIPTIONS, run_wizard
+from ese.integrations import discover_integrations, publish_run_evidence
 from ese.pack_sdk import (
     PackProjectError,
     describe_pack_project,
@@ -343,6 +345,49 @@ def list_views():
         typer.echo("Broken external artifact views:")
         for failure in failures:
             typer.echo(f"  - {failure.entry_point}: {failure.error}")
+
+
+@app.command("integrations")
+def list_installed_integrations():
+    """List installed external evidence-publishing integrations."""
+    integrations, failures = discover_integrations()
+    if not integrations and not failures:
+        typer.echo("No external integrations installed.")
+        return
+
+    if integrations:
+        typer.echo("Installed external integrations:")
+        for integration in integrations:
+            typer.echo(f"  - {integration.key}: {integration.title} - {integration.summary}")
+    if failures:
+        typer.echo("Broken external integrations:")
+        for failure in failures:
+            typer.echo(f"  - {failure.entry_point}: {failure.error}")
+
+
+@app.command("extensions")
+def list_extensions(json_output: bool = typer.Option(False, "--json", help="Emit extension surface metadata as JSON")):
+    """List the supported ESE extension surfaces and contract versions."""
+    surfaces = [
+        {
+            "key": surface.key,
+            "title": surface.title,
+            "entry_point_group": surface.entry_point_group,
+            "contract_version": surface.contract_version,
+        }
+        for surface in list_extension_surfaces()
+    ]
+    if json_output:
+        typer.echo(json.dumps(surfaces, indent=2))
+        return
+
+    typer.echo("Supported ESE extension surfaces:")
+    for surface in surfaces:
+        typer.echo(
+            "  - "
+            f"{surface['key']}: contract v{surface['contract_version']} "
+            f"via {surface['entry_point_group']}"
+        )
 
 
 @pack_app.command("init")
@@ -783,6 +828,62 @@ def export(
 
     Path(target).write_text(payload, encoding="utf-8")
     typer.echo(f"✅ Exported {clean_format} report: {target}")
+
+
+@app.command("publish")
+def publish(
+    integration: str = typer.Option(..., help="Installed external integration key"),
+    artifacts_dir: str = typer.Option("artifacts", help="Directory containing run artifacts"),
+    target: str | None = typer.Option(None, help="Optional integration-specific target, such as a path or channel"),
+    options: str | None = typer.Option(None, help="Optional JSON object of integration-specific publish options"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview the publish request without side effects"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable publish metadata"),
+):
+    """Publish run evidence through an installed external integration."""
+    parsed_options: dict[str, Any] = {}
+    if options:
+        try:
+            parsed = json.loads(options)
+        except json.JSONDecodeError as err:
+            typer.echo(f"❌ ESE publish failed: options must be valid JSON: {err}")
+            raise typer.Exit(code=2) from err
+        if not isinstance(parsed, dict):
+            typer.echo("❌ ESE publish failed: options must decode to a JSON object.")
+            raise typer.Exit(code=2)
+        parsed_options = parsed
+
+    try:
+        result = publish_run_evidence(
+            artifacts_dir=artifacts_dir,
+            integration_key=integration,
+            target=target,
+            options=parsed_options,
+            dry_run=dry_run,
+        )
+    except ValueError as err:
+        typer.echo(f"❌ ESE publish failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    payload = {
+        "integration_key": result.integration_key,
+        "status": result.status,
+        "location": result.location,
+        "message": result.message,
+        "outputs": list(result.outputs),
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    typer.echo(
+        f"✅ Published run evidence via '{result.integration_key}' with status '{result.status}'."
+    )
+    if result.location:
+        typer.echo(f"Location: {result.location}")
+    if result.message:
+        typer.echo(f"Message: {result.message}")
+    for output in result.outputs:
+        typer.echo(f"Output: {output}")
 
 
 @app.command("feedback")

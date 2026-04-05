@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from ese.artifact_views import ArtifactViewDefinition
 from ese.cli import app, main
 from ese.config_packs import ConfigPackDefinition, PackRoleDefinition
+from ese.integrations import IntegrationDefinition, IntegrationPublishResult
 from ese.policy_checks import PolicyCheckDefinition
 from ese.report_exporters import ReportExporterDefinition
 
@@ -163,6 +164,36 @@ def test_views_command_lists_installed_artifact_views(monkeypatch) -> None:
     assert "release-brief" in result.stdout
 
 
+def test_integrations_command_lists_installed_integrations(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.cli.discover_integrations",
+        lambda: (
+            [
+                IntegrationDefinition(
+                    key="filesystem-evidence",
+                    title="Filesystem Evidence",
+                    summary="Write a portable evidence bundle to disk.",
+                    publish=lambda context, request: {"status": "published"},
+                )
+            ],
+            [],
+        ),
+    )
+
+    result = runner.invoke(app, ["integrations"])
+
+    assert result.exit_code == 0
+    assert "filesystem-evidence" in result.stdout
+
+
+def test_extensions_command_lists_supported_surfaces() -> None:
+    result = runner.invoke(app, ["extensions"])
+
+    assert result.exit_code == 0
+    assert "config-packs" in result.stdout
+    assert "integrations" in result.stdout
+
+
 def test_no_args_prints_help_when_non_interactive() -> None:
     result = runner.invoke(app, [])
 
@@ -248,6 +279,36 @@ def test_run_alias_still_works(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert (artifacts_dir / "ese_summary.md").exists()
+
+
+def test_publish_command_supports_external_integrations(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.cli.publish_run_evidence",
+        lambda **kwargs: IntegrationPublishResult(
+            integration_key="filesystem-evidence",
+            status="published",
+            location="/tmp/evidence",
+            message="bundle written",
+            outputs=("/tmp/evidence/manifest.json",),
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "publish",
+            "--integration",
+            "filesystem-evidence",
+            "--artifacts-dir",
+            "artifacts",
+            "--options",
+            '{"copy_documents": true}',
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "filesystem-evidence" in result.stdout
+    assert "/tmp/evidence/manifest.json" in result.stdout
 
 
 def test_start_command_accepts_scope_override(tmp_path: Path) -> None:

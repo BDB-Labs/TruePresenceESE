@@ -97,3 +97,28 @@ def test_render_external_artifact_view_returns_document_payload(monkeypatch) -> 
     assert view["kind"] == "document"
     assert view["key"] == f"{ARTIFACT_VIEW_DOCUMENT_PREFIX}release-brief"
     assert "Missing rollback path" in view["content"]
+
+
+def test_discover_artifact_views_rejects_unsupported_contract_version(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.artifact_views._artifact_view_entry_points",
+        lambda: [
+            _FakeEntryPoint(
+                "release_brief",
+                {
+                    "key": "release-brief",
+                    "title": "Release Brief",
+                    "summary": "Generated release brief for dashboard viewing.",
+                    "format": "md",
+                    "contract_version": 99,
+                    "render": lambda report: "# Release Brief\n",
+                },
+            )
+        ],
+    )
+
+    views, failures = discover_artifact_views()
+
+    assert views == []
+    assert len(failures) == 1
+    assert "not supported" in failures[0].error

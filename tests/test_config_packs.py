@@ -100,3 +100,24 @@ def test_normalize_config_pack_definition_rejects_duplicate_role_keys() -> None:
                 ],
             }
         )
+
+
+def test_normalize_config_pack_definition_rejects_unsupported_contract_version() -> None:
+    with pytest.raises(ValueError, match="not supported"):
+        normalize_config_pack_definition(
+            {
+                "contract_version": 99,
+                "key": "release-ops",
+                "title": "Release Operations",
+                "summary": "Reusable release-review pack",
+                "preset": "strict",
+                "goal_profile": "high-quality",
+                "roles": [
+                    {
+                        "key": "release_planner",
+                        "responsibility": "Plan the release",
+                        "prompt": "Plan the release.",
+                    }
+                ],
+            }
+        )

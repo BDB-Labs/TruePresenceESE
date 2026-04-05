@@ -2,7 +2,15 @@
 
 ESE should remain the orchestration substrate, not the vertical application.
 
-External packs target config-pack contract version `1`.
+Supported external surfaces all target contract version `1` in this build:
+
+- `ese.config_packs`
+- `ese.policy_checks`
+- `ese.report_exporters`
+- `ese.artifact_views`
+- `ese.integrations`
+
+Use `ese extensions` to inspect the supported surface names, entry point groups, and contract versions from the installed CLI.
 
 ## Core boundary
 
@@ -114,6 +122,7 @@ Each policy check exposes:
 - `title`
 - `summary`
 - `check`
+- optional `contract_version` (defaults to `1`)
 
 Each policy result exposes:
 
@@ -167,6 +176,7 @@ Each exporter exposes:
 - `content_type`
 - `default_filename`
 - `render`
+- optional `contract_version` (defaults to `1`)
 
 Packaging example:
 
@@ -193,6 +203,7 @@ Each view exposes:
 - `format`
 - `render`
 - optional `available`
+- optional `contract_version` (defaults to `1`)
 
 Views are surfaced inside the normal `report["documents"]` payload using keys prefixed with `view:`.
 
@@ -203,11 +214,74 @@ Packaging example:
 release_brief = "my_reporting_plugin.views:load_view"
 ```
 
+## Integrations
+
+External integrations are discovered through the Python entry point group `ese.integrations`.
+
+Each entry point should load to either:
+
+- an `IntegrationDefinition`
+- a mapping shaped like `IntegrationDefinition`
+- a callable that accepts `IntegrationContext` and `IntegrationRequest`
+
+Each integration exposes:
+
+- `key`
+- `title`
+- `summary`
+- `publish`
+- optional `contract_version` (defaults to `1`)
+
+Integrations are executed through:
+
+```bash
+ese publish --integration my-integration --artifacts-dir artifacts
+```
+
+Packaging example:
+
+```toml
+[project.entry-points."ese.integrations"]
+filesystem_evidence = "my_integration_plugin.integration:load_integration"
+```
+
+## Starter repository model
+
+Starter repositories should be treated as real installable packages that happen to use ESE as their foundation.
+
+Recommended layout:
+
+```text
+starter/
+  pyproject.toml
+  README.md
+  src/my_vertical/
+    __init__.py
+    pack.py
+    policy.py
+    exporters.py
+    views.py
+    integration.py
+    ese_pack.yaml
+    prompts/
+      analyst.md
+      reviewer.md
+```
+
+Recommended operating model:
+
+- keep ESE core generic
+- put vertical prompts, packs, policies, and integrations in the starter or sibling app repo
+- version each starter independently of ESE core
+- prove portability in CI by installing the starter into a clean environment
+- let future products fork or clone the starter, not the ESE core repo
+
 ## Operating model
 
 - Keep ESE releaseable with zero external packs installed.
 - Treat packs as additive integrations, not core dependencies.
 - Treat policy checks as additive governance layers, not hard-coded product logic in ESE core.
 - Treat exporters and artifact views as additive reporting layers, not new built-in output formats for every vertical.
+- Treat integrations as additive evidence-delivery layers, not hard-coded SaaS destinations in ESE core.
 - Put domain tests in the domain repository, not in ESE core.
 - Keep the pack contract stable so vertical repos can upgrade ESE without forking it.

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "release-governance-starter"
+version = "0.1.0"
+description = "Starter vertical repository for ESE release-governance workflows"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["ese-cli"]
+
+[project.entry-points."ese.config_packs"]
+release_governance = "release_governance_starter.pack:load_pack"
+
+[project.entry-points."ese.policy_checks"]
+release_governance_safety = "release_governance_starter.policy:load_policy"
+
+[project.entry-points."ese.artifact_views"]
+go_live_brief = "release_governance_starter.views:load_view"
+
+[project.entry-points."ese.integrations"]
+release_governance_bundle = "release_governance_starter.integration:load_integration"
+
+[tool.setuptools.packages.find]
+where = ["src"]

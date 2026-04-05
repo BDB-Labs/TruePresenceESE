@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any, cast
 
+from ese.extension_contracts import (
+    normalize_contract_version,
+    normalize_non_empty,
+    title_from_key,
+)
+
 REPORT_EXPORTER_ENTRY_POINT_GROUP = "ese.report_exporters"
+REPORT_EXPORTER_CONTRACT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -18,6 +25,7 @@ class ReportExporterDefinition:
     content_type: str
     default_filename: str
     render: Callable[[dict[str, Any]], str]
+    contract_version: int = REPORT_EXPORTER_CONTRACT_VERSION
 
 
 @dataclass(frozen=True)
@@ -33,16 +41,6 @@ def _report_exporter_entry_points() -> list[Any]:
     return list(discovered.get(REPORT_EXPORTER_ENTRY_POINT_GROUP, []))
 
 
-def _normalize_non_empty(value: Any, *, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be a non-empty string")
-    return value.strip()
-
-
-def _title_from_key(key: str) -> str:
-    return " ".join(part.capitalize() for part in key.replace("_", "-").split("-"))
-
-
 def _builtin_report_exporters() -> list[ReportExporterDefinition]:
     from ese.reports import render_junit, render_sarif
 
@@ -54,6 +52,7 @@ def _builtin_report_exporters() -> list[ReportExporterDefinition]:
             content_type="application/sarif+json; charset=utf-8",
             default_filename="ese_report.sarif.json",
             render=render_sarif,
+            contract_version=REPORT_EXPORTER_CONTRACT_VERSION,
         ),
         ReportExporterDefinition(
             key="junit",
@@ -62,6 +61,7 @@ def _builtin_report_exporters() -> list[ReportExporterDefinition]:
             content_type="application/xml; charset=utf-8",
             default_filename="ese_report.junit.xml",
             render=render_junit,
+            contract_version=REPORT_EXPORTER_CONTRACT_VERSION,
         ),
     ]
 
@@ -78,23 +78,28 @@ def _normalize_report_exporter_definition(value: Any, *, fallback_key: str) -> R
         if not callable(raw_render):
             raise TypeError("Report exporter definitions must provide a callable 'render'")
         definition = ReportExporterDefinition(
-            key=_normalize_non_empty(value.get("key") or fallback_key, label="report exporter key"),
-            title=_normalize_non_empty(
-                value.get("title") or _title_from_key(fallback_key),
+            key=normalize_non_empty(value.get("key") or fallback_key, label="report exporter key"),
+            title=normalize_non_empty(
+                value.get("title") or title_from_key(fallback_key),
                 label="report exporter title",
             ),
-            summary=_normalize_non_empty(value.get("summary"), label="report exporter summary"),
-            content_type=_normalize_non_empty(value.get("content_type"), label="report exporter content_type"),
-            default_filename=_normalize_non_empty(
+            summary=normalize_non_empty(value.get("summary"), label="report exporter summary"),
+            content_type=normalize_non_empty(value.get("content_type"), label="report exporter content_type"),
+            default_filename=normalize_non_empty(
                 value.get("default_filename"),
                 label="report exporter default_filename",
             ),
             render=cast(Callable[[dict[str, Any]], str], raw_render),
+            contract_version=normalize_contract_version(
+                value.get("contract_version"),
+                extension_name="report exporter",
+                expected_version=REPORT_EXPORTER_CONTRACT_VERSION,
+            ),
         )
     elif callable(value):
         definition = ReportExporterDefinition(
             key=fallback_key,
-            title=_title_from_key(fallback_key),
+            title=title_from_key(fallback_key),
             summary=((value.__doc__ or "").strip() or f"External report exporter '{fallback_key}'."),
             content_type="text/plain; charset=utf-8",
             default_filename=f"ese_report.{fallback_key}.txt",
@@ -109,15 +114,20 @@ def _normalize_report_exporter_definition(value: Any, *, fallback_key: str) -> R
         raise TypeError("Report exporter definitions must provide a callable 'render'")
 
     return ReportExporterDefinition(
-        key=_normalize_non_empty(definition.key, label="report exporter key"),
-        title=_normalize_non_empty(definition.title, label="report exporter title"),
-        summary=_normalize_non_empty(definition.summary, label="report exporter summary"),
-        content_type=_normalize_non_empty(definition.content_type, label="report exporter content_type"),
-        default_filename=_normalize_non_empty(
+        key=normalize_non_empty(definition.key, label="report exporter key"),
+        title=normalize_non_empty(definition.title, label="report exporter title"),
+        summary=normalize_non_empty(definition.summary, label="report exporter summary"),
+        content_type=normalize_non_empty(definition.content_type, label="report exporter content_type"),
+        default_filename=normalize_non_empty(
             definition.default_filename,
             label="report exporter default_filename",
         ),
         render=definition.render,
+        contract_version=normalize_contract_version(
+            definition.contract_version,
+            extension_name="report exporter",
+            expected_version=REPORT_EXPORTER_CONTRACT_VERSION,
+        ),
     )
 
 
@@ -125,7 +135,7 @@ def discover_external_report_exporters() -> tuple[list[ReportExporterDefinition]
     exporters_by_key: dict[str, ReportExporterDefinition] = {}
     failures: list[ReportExporterLoadFailure] = []
     for entry_point in _report_exporter_entry_points():
-        entry_name = _normalize_non_empty(
+        entry_name = normalize_non_empty(
             getattr(entry_point, "name", "report-exporter"),
             label="entry point name",
         )
@@ -154,7 +164,7 @@ def list_report_exporters() -> list[ReportExporterDefinition]:
 
 
 def resolve_report_exporter(key: str) -> ReportExporterDefinition:
-    clean_key = _normalize_non_empty(key, label="report exporter format").lower()
+    clean_key = normalize_non_empty(key, label="report exporter format").lower()
     for exporter in list_report_exporters():
         if exporter.key == clean_key:
             return exporter

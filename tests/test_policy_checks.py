@@ -99,3 +99,27 @@ def test_evaluate_policy_checks_reports_load_failures(monkeypatch) -> None:
     assert len(findings) == 1
     assert findings[0].severity == "error"
     assert "Failed to load policy check" in findings[0].message
+
+
+def test_discover_policy_checks_rejects_unsupported_contract_version(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.policy_checks._policy_check_entry_points",
+        lambda: [
+            _FakeEntryPoint(
+                "release_safety",
+                {
+                    "key": "release-safety",
+                    "title": "Release Safety",
+                    "summary": "Require release-focused roles for rollout scopes.",
+                    "contract_version": 99,
+                    "check": lambda context: [],
+                },
+            )
+        ],
+    )
+
+    checks, failures = discover_policy_checks()
+
+    assert checks == []
+    assert len(failures) == 1
+    assert "not supported" in failures[0].error

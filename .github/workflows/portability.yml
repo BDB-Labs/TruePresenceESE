@@ -1,0 +1,91 @@
+name: ESE Portability
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+jobs:
+  portability:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.26"
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Sync project
+        run: uv sync --locked --extra dev
+
+      - name: Install external examples and starters
+        run: |
+          uv pip install --python .venv/bin/python \
+            -e examples/release_ops_pack \
+            -e examples/release_policy_plugin \
+            -e examples/release_reporting_plugin \
+            -e examples/release_integration_plugin \
+            -e starters/release_governance_starter \
+            -e starters/architecture_review_starter
+
+      - name: Inspect extension surfaces
+        run: |
+          uv run ese extensions
+          uv run ese packs
+          uv run ese policies
+          uv run ese exporters
+          uv run ese views
+          uv run ese integrations
+
+      - name: Validate portable packs
+        run: |
+          uv run ese pack validate examples/release_ops_pack
+          uv run ese pack test examples/release_ops_pack
+          uv run ese pack validate starters/release_governance_starter
+          uv run ese pack test starters/release_governance_starter
+          uv run ese pack validate starters/architecture_review_starter
+          uv run ese pack test starters/architecture_review_starter
+
+      - name: Execute demo task and publish artifacts
+        run: |
+          uv run ese task "Review the staged rollout plan for billing cutover" \
+            --template release-readiness \
+            --execution-mode demo \
+            --artifacts-dir portability-artifacts
+
+          uv run ese export \
+            --artifacts-dir portability-artifacts \
+            --format blocker-csv \
+            --output-path portability-artifacts/blockers.csv
+
+          uv run ese export \
+            --artifacts-dir portability-artifacts \
+            --format architecture-risk-csv \
+            --output-path portability-artifacts/architecture_risks.csv
+
+          uv run ese publish \
+            --integration filesystem-evidence \
+            --artifacts-dir portability-artifacts \
+            --target portability-published \
+            --options '{"copy_documents": true, "max_documents": 2}'
+
+          uv run ese publish \
+            --integration release-governance-bundle \
+            --artifacts-dir portability-artifacts \
+            --target portability-release-governance
+
+      - name: Assert published outputs exist
+        run: |
+          test -f portability-artifacts/ese_summary.md
+          test -f portability-artifacts/blockers.csv
+          test -f portability-artifacts/architecture_risks.csv
+          test -f portability-artifacts/portability-published/evidence_manifest.json
+          test -f portability-artifacts/portability-published/release_overview.md
+          test -f portability-artifacts/portability-release-governance/approval_packet.json
+          test -f portability-artifacts/portability-release-governance/go_live_summary.md

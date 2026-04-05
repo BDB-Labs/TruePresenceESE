@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any
 
+from ese.extension_contracts import normalize_contract_version, normalize_non_empty
+
 CONFIG_PACK_ENTRY_POINT_GROUP = "ese.config_packs"
 CONFIG_PACK_CONTRACT_VERSION = 1
 
@@ -37,23 +39,12 @@ def _config_pack_entry_points() -> list[Any]:
     return list(discovered.get(CONFIG_PACK_ENTRY_POINT_GROUP, []))
 
 
-def _normalize_non_empty(value: Any, *, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be a non-empty string")
-    return value.strip()
-
-
 def _normalize_contract_version(value: Any) -> int:
-    if value is None:
-        return CONFIG_PACK_CONTRACT_VERSION
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("config pack contract_version must be an integer")
-    if value != CONFIG_PACK_CONTRACT_VERSION:
-        raise ValueError(
-            "config pack contract_version "
-            f"{value} is not supported by this ESE build; expected {CONFIG_PACK_CONTRACT_VERSION}"
-        )
-    return value
+    return normalize_contract_version(
+        value,
+        extension_name="config pack",
+        expected_version=CONFIG_PACK_CONTRACT_VERSION,
+    )
 
 
 def _normalize_role_definition(value: Any) -> PackRoleDefinition:
@@ -62,9 +53,9 @@ def _normalize_role_definition(value: Any) -> PackRoleDefinition:
     if not isinstance(value, Mapping):
         raise TypeError("Pack roles must be PackRoleDefinition instances or mappings")
     return PackRoleDefinition(
-        key=_normalize_non_empty(value.get("key"), label="pack role key"),
-        responsibility=_normalize_non_empty(value.get("responsibility"), label="pack role responsibility"),
-        prompt=_normalize_non_empty(value.get("prompt"), label="pack role prompt"),
+        key=normalize_non_empty(value.get("key"), label="pack role key"),
+        responsibility=normalize_non_empty(value.get("responsibility"), label="pack role responsibility"),
+        prompt=normalize_non_empty(value.get("prompt"), label="pack role prompt"),
         temperature=float(value.get("temperature", 0.2)),
     )
 
@@ -101,11 +92,11 @@ def normalize_config_pack_definition(value: Any) -> ConfigPackDefinition:
         seen_role_keys.add(role.key)
 
     return ConfigPackDefinition(
-        key=_normalize_non_empty(payload.get("key"), label="config pack key").lower(),
-        title=_normalize_non_empty(payload.get("title"), label="config pack title"),
-        summary=_normalize_non_empty(payload.get("summary"), label="config pack summary"),
-        preset=_normalize_non_empty(payload.get("preset"), label="config pack preset"),
-        goal_profile=_normalize_non_empty(payload.get("goal_profile"), label="config pack goal profile"),
+        key=normalize_non_empty(payload.get("key"), label="config pack key").lower(),
+        title=normalize_non_empty(payload.get("title"), label="config pack title"),
+        summary=normalize_non_empty(payload.get("summary"), label="config pack summary"),
+        preset=normalize_non_empty(payload.get("preset"), label="config pack preset"),
+        goal_profile=normalize_non_empty(payload.get("goal_profile"), label="config pack goal profile"),
         roles=normalized_roles,
         contract_version=_normalize_contract_version(payload.get("contract_version")),
     )

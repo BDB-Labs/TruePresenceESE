@@ -1,0 +1,15 @@
+contract_version: 1
+key: release-governance
+title: Release Governance
+summary: Starter pack for rollout governance, launch readiness, and go-live review.
+preset: strict
+goal_profile: high-quality
+roles:
+  - key: release_planner
+    responsibility: Build the release sequence, required gates, and rollback expectations.
+    prompt_file: prompts/release_planner.md
+    temperature: 0.2
+  - key: release_gatekeeper
+    responsibility: Challenge the plan for unsafe launch assumptions, missing approvals, and weak rollback coverage.
+    prompt_file: prompts/release_gatekeeper.md
+    temperature: 0.2

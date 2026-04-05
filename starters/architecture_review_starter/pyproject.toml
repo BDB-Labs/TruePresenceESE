@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "architecture-review-starter"
+version = "0.1.0"
+description = "Starter vertical repository for ESE architecture-review workflows"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["ese-cli"]
+
+[project.entry-points."ese.config_packs"]
+architecture_review = "architecture_review_starter.pack:load_pack"
+
+[project.entry-points."ese.policy_checks"]
+architecture_scope = "architecture_review_starter.policy:load_policy"
+
+[project.entry-points."ese.report_exporters"]
+architecture_risk_csv = "architecture_review_starter.exporters:load_exporter"
+
+[project.entry-points."ese.artifact_views"]
+decision_brief = "architecture_review_starter.views:load_view"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -15,6 +15,8 @@ from ese.pack_sdk import (
 
 runner = CliRunner()
 EXAMPLE_PACK_DIR = Path("examples/release_ops_pack")
+RELEASE_STARTER_DIR = Path("starters/release_governance_starter")
+ARCHITECTURE_STARTER_DIR = Path("starters/architecture_review_starter")
 
 
 def test_scaffold_pack_project_creates_valid_manifest_and_loader(tmp_path: Path) -> None:
@@ -88,3 +90,21 @@ def test_pack_cli_init_validate_and_test_commands(tmp_path: Path) -> None:
     smoke_payload = json.loads(test_result.stdout)
     assert smoke_payload["pack_key"] == "release-ops"
     assert smoke_payload["config"]["install_profile"]["kind"] == "pack"
+
+
+def test_release_governance_starter_pack_is_valid_and_smoke_testable() -> None:
+    report = describe_pack_project(RELEASE_STARTER_DIR)
+    smoke = smoke_test_pack_project(RELEASE_STARTER_DIR)
+
+    assert report["pack_key"] == "release-governance"
+    assert report["role_count"] == 2
+    assert smoke["config"]["role_order"] == ["release_planner", "release_gatekeeper"]
+
+
+def test_architecture_review_starter_pack_is_valid_and_smoke_testable() -> None:
+    report = describe_pack_project(ARCHITECTURE_STARTER_DIR)
+    smoke = smoke_test_pack_project(ARCHITECTURE_STARTER_DIR)
+
+    assert report["pack_key"] == "architecture-review"
+    assert report["role_count"] == 2
+    assert smoke["config"]["role_order"] == ["architecture_analyst", "migration_reviewer"]

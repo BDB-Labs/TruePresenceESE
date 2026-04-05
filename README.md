@@ -283,6 +283,45 @@ Use `ese exporters` and `ese views` to list what is available in the current env
 
 This repository now carries a sample external reporting plugin in [`examples/release_reporting_plugin`](examples/release_reporting_plugin).
 
+## External Integrations
+
+Installed integrations can publish run evidence to external systems through the `ese.integrations` Python entry point group.
+
+Use:
+
+- `ese integrations` to list installed integrations
+- `ese publish --integration ...` to publish a run family
+- `ese extensions` to inspect the supported extension contract surfaces and versions
+
+This repository now carries a sample integration plugin in [`examples/release_integration_plugin`](examples/release_integration_plugin).
+
+## Starter Repos
+
+This repository now includes two installable starter verticals that treat ESE as the substrate rather than the application:
+
+- [`starters/release_governance_starter`](starters/release_governance_starter): release-readiness, go-live review, and evidence publication
+- [`starters/architecture_review_starter`](starters/architecture_review_starter): architecture review, migration risk assessment, and decision briefing
+
+These are meant to be copied into sibling repositories and extended, not folded back into ESE core.
+
+## Portability CI
+
+Portability is now enforced in CI through [`.github/workflows/portability.yml`](.github/workflows/portability.yml).
+
+That workflow installs:
+
+- ESE core
+- the example pack, policy, reporting, and integration plugins
+- both starter repositories
+
+It then proves:
+
+- extension discovery
+- pack validation and smoke testing
+- task-first execution in demo mode
+- plugin-defined export formats
+- plugin-defined evidence publishing
+
 ## Provider/model selection and adapters
 
 Wizard provider presets: `openai`, `anthropic`, `google`, `xai`, `openrouter`, `huggingface`, `local`, `custom_api`.
@@ -357,6 +396,7 @@ runtime:
 
 - Config schema + version policy: [`docs/CONFIG_CONTRACT.md`](docs/CONFIG_CONTRACT.md)
 - Extension and pack boundary: [`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md)
+- Commercial packaging and positioning: [`docs/COMMERCIAL_PACKAGING.md`](docs/COMMERCIAL_PACKAGING.md)
 - Role report JSON contract: [`docs/ROLE_REPORT_CONTRACT.md`](docs/ROLE_REPORT_CONTRACT.md)
 - Pipeline state and lineage contract: [`docs/PIPELINE_STATE.md`](docs/PIPELINE_STATE.md)
 - Release evidence guidance: [`docs/RELEASE.md`](docs/RELEASE.md)

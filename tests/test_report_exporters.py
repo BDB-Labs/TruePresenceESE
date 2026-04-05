@@ -67,3 +67,29 @@ def test_render_report_export_supports_external_formats(monkeypatch) -> None:
     assert "architect,HIGH" in body
     assert content_type.startswith("text/csv")
     assert filename == "ese_blockers.csv"
+
+
+def test_discover_external_report_exporters_rejects_unsupported_contract_version(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.report_exporters._report_exporter_entry_points",
+        lambda: [
+            _FakeEntryPoint(
+                "blocker_csv",
+                {
+                    "key": "blocker-csv",
+                    "title": "Blocker CSV",
+                    "summary": "CSV export of blocker findings.",
+                    "content_type": "text/csv; charset=utf-8",
+                    "default_filename": "ese_blockers.csv",
+                    "contract_version": 99,
+                    "render": lambda report: "role,severity\narchitect,HIGH\n",
+                },
+            )
+        ],
+    )
+
+    exporters, failures = discover_external_report_exporters()
+
+    assert exporters == []
+    assert len(failures) == 1
+    assert "not supported" in failures[0].error
