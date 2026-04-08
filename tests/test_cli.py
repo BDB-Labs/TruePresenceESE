@@ -465,6 +465,7 @@ def test_task_command_runs_installed_pack_without_hand_written_config(tmp_path: 
 
     assert result.exit_code == 0
     assert (artifacts_dir / "ese_summary.md").exists()
+    assert "source: pack 'release-governance'" in result.stdout
     assert "pack 'release-governance'" in result.stdout
 
 

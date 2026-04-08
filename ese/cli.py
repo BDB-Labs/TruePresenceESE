@@ -124,6 +124,30 @@ def _enforce_doctor_or_exit(cfg: dict[str, Any]) -> None:
             typer.echo(f"  - {item}")
 
 
+def _preflight_source_label(cfg: dict[str, Any]) -> str:
+    install_profile = cfg.get("install_profile") or {}
+    if isinstance(install_profile, dict):
+        kind = str(install_profile.get("kind") or "").strip().lower()
+        if kind == "pack":
+            pack_key = str(install_profile.get("pack") or cfg.get("pack_key") or "").strip()
+            if pack_key:
+                return f"pack '{pack_key}'"
+        if kind == "template":
+            template_key = str(install_profile.get("template") or cfg.get("template_key") or "").strip()
+            if template_key:
+                return f"template '{template_key}'"
+        if kind == "framework":
+            return "framework config"
+
+    pack_key = str(cfg.get("pack_key") or "").strip()
+    if pack_key:
+        return f"pack '{pack_key}'"
+    template_key = str(cfg.get("template_key") or "").strip()
+    if template_key:
+        return f"template '{template_key}'"
+    return "custom config"
+
+
 def _print_preflight(kind: str, cfg: dict[str, Any], *, quiet: bool = False) -> None:
     if quiet:
         return
@@ -140,7 +164,7 @@ def _print_preflight(kind: str, cfg: dict[str, Any], *, quiet: bool = False) -> 
     lines = [
         "Preflight:",
         f"  - run type: {kind}",
-        f"  - template: {cfg.get('template_key', 'custom')}",
+        f"  - source: {_preflight_source_label(cfg)}",
         f"  - provider: {provider_cfg.get('name', 'unknown')}",
         f"  - model: {provider_cfg.get('model', 'unknown')}",
         f"  - adapter: {runtime_cfg.get('adapter', 'dry-run')}",
