@@ -27,6 +27,7 @@ def test_scaffold_starter_project_creates_valid_bundle_manifest(tmp_path: Path) 
     manifest_path = project_dir / "src" / "release_governance_starter" / "ese_starter.yaml"
     assert project.manifest_path == manifest_path.resolve()
     assert manifest_path.exists()
+    assert (project_dir / "src" / "release_governance_starter" / "ese_application.yaml").exists()
 
     report = describe_starter_project(project_dir)
     assert report["starter_key"] == "release-governance"
@@ -78,6 +79,33 @@ def test_starter_cli_init_validate_and_test_commands(tmp_path: Path) -> None:
     smoke_payload = json.loads(test_result.stdout)
     assert smoke_payload["starter_key"] == "architecture-review"
     assert smoke_payload["pack_smoke"]["config"]["install_profile"]["kind"] == "pack"
+
+
+def test_bundle_cli_init_validate_and_test_commands(tmp_path: Path) -> None:
+    project_dir = tmp_path / "systems_delivery_bundle"
+
+    init_result = runner.invoke(
+        app,
+        [
+            "bundle",
+            "init",
+            str(project_dir),
+            "--key",
+            "systems-delivery",
+        ],
+    )
+    assert init_result.exit_code == 0
+    assert "Scaffolded external application bundle" in init_result.stdout
+
+    validate_result = runner.invoke(app, ["bundle", "validate", str(project_dir), "--json"])
+    assert validate_result.exit_code == 0
+    validation_payload = json.loads(validate_result.stdout)
+    assert validation_payload["starter_key"] == "systems-delivery"
+
+    test_result = runner.invoke(app, ["bundle", "test", str(project_dir), "--json"])
+    assert test_result.exit_code == 0
+    smoke_payload = json.loads(test_result.stdout)
+    assert smoke_payload["starter_key"] == "systems-delivery"
 
 
 def test_release_governance_starter_bundle_is_valid_and_smoke_testable() -> None:

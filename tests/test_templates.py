@@ -124,3 +124,36 @@ def test_build_task_config_supports_installed_pack(monkeypatch) -> None:
     assert cfg["role_order"] == ["release_planner", "release_gatekeeper"]
     assert "release_planner" in cfg["roles"]
     assert cfg["runtime"]["adapter"] == "dry-run"
+
+
+def test_build_task_config_supports_application_bundle(monkeypatch) -> None:
+    pack = load_pack_definition_from_manifest(
+        Path("starters/release_governance_starter/src/release_governance_starter/ese_pack.yaml")
+    )
+    monkeypatch.setattr(
+        "ese.templates.resolve_application_bundle",
+        lambda key: type(
+            "Bundle",
+            (),
+            {
+                "key": "release-governance",
+                "title": "Release Governance Starter",
+                "pack_key": "release-governance",
+            },
+        )(),
+    )
+    monkeypatch.setattr("ese.templates.get_config_pack", lambda key: pack)
+
+    cfg = build_task_config(
+        scope="Prepare the go-live gate review for billing cutover",
+        bundle_key="release-governance",
+        provider="openai",
+        execution_mode="demo",
+        artifacts_dir="bundle-artifacts",
+    )
+
+    assert cfg["install_profile"]["kind"] == "bundle"
+    assert cfg["install_profile"]["bundle"] == "release-governance"
+    assert cfg["install_profile"]["pack"] == "release-governance"
+    assert cfg["bundle_key"] == "release-governance"
+    assert cfg["pack_key"] == "release-governance"

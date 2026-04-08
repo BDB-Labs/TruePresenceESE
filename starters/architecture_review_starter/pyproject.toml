@@ -25,8 +25,11 @@ decision_brief = "architecture_review_starter.views:load_view"
 [project.entry-points."ese.integrations"]
 architecture_decision_bundle = "architecture_review_starter.integration:load_integration"
 
+[project.entry-points."ese.application_bundles"]
+architecture_review_application = "architecture_review_starter.bundle:load_application_bundle"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"architecture_review_starter" = ["ese_pack.yaml", "ese_starter.yaml", "prompts/*.md"]
+"architecture_review_starter" = ["ese_pack.yaml", "ese_application.yaml", "ese_starter.yaml", "prompts/*.md"]

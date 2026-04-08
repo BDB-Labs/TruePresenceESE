@@ -6,6 +6,10 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from ese.application_bundles import (
+    ApplicationBundleDefinition,
+    resolve_application_bundle,
+)
 from ese.config import ConfigValidationError, validate_config, write_config
 from ese.config_packs import ConfigPackDefinition, get_config_pack
 from ese.framework_defaults import (
@@ -170,6 +174,16 @@ def _resolve_task_pack(pack_key: str) -> ConfigPackDefinition:
         raise ConfigValidationError(str(err)) from err
 
 
+def _resolve_task_bundle(bundle_key: str) -> ApplicationBundleDefinition:
+    clean_key = (bundle_key or "").strip().lower()
+    if not clean_key:
+        raise ConfigValidationError("Bundle key is required when using bundle-driven task execution.")
+    try:
+        return resolve_application_bundle(clean_key)
+    except KeyError as err:
+        raise ConfigValidationError(str(err)) from err
+
+
 def _roles_for_pack(pack: ConfigPackDefinition) -> tuple[dict[str, dict[str, Any]], list[str]]:
     role_order = [role.key for role in pack.roles]
     roles_cfg = {
@@ -264,6 +278,7 @@ def build_task_config(
     scope: str,
     template_key: str | None = None,
     pack_key: str | None = None,
+    bundle_key: str | None = None,
     provider: str = "openai",
     execution_mode: str = AUTO_EXECUTION_MODE,
     artifacts_dir: str = "artifacts",
@@ -285,13 +300,43 @@ def build_task_config(
 
     clean_template_key = (template_key or "").strip()
     clean_pack_key = (pack_key or "").strip()
-    if clean_template_key and clean_pack_key:
-        raise ConfigValidationError("Choose either a task template or an installed pack, not both.")
+    clean_bundle_key = (bundle_key or "").strip()
+    selected_sources = [
+        label
+        for label, value in (
+            ("task template", clean_template_key),
+            ("installed pack", clean_pack_key),
+            ("application bundle", clean_bundle_key),
+        )
+        if value
+    ]
+    if len(selected_sources) > 1:
+        raise ConfigValidationError(
+            "Choose only one task source: template, installed pack, or application bundle."
+        )
 
     clean_provider = (provider or "openai").strip().lower()
     pack_definition: ConfigPackDefinition | None = None
+    bundle_definition: ApplicationBundleDefinition | None = None
     template: TaskTemplate | None = None
-    if clean_pack_key:
+    if clean_bundle_key:
+        bundle_definition = _resolve_task_bundle(clean_bundle_key)
+        pack_definition = _resolve_task_pack(bundle_definition.pack_key)
+        preset = pack_definition.preset
+        goal_profile = pack_definition.goal_profile
+        roles_cfg, role_order = _roles_for_pack(pack_definition)
+        source_metadata = {
+            "install_profile": {
+                "kind": "bundle",
+                "bundle": bundle_definition.key,
+                "pack": pack_definition.key,
+            },
+            "bundle_key": bundle_definition.key,
+            "bundle_title": bundle_definition.title,
+            "pack_key": pack_definition.key,
+            "pack_title": pack_definition.title,
+        }
+    elif clean_pack_key:
         pack_definition = _resolve_task_pack(clean_pack_key)
         preset = pack_definition.preset
         goal_profile = pack_definition.goal_profile

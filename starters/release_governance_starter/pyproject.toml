@@ -25,8 +25,11 @@ release_gate_csv = "release_governance_starter.exporters:load_exporter"
 [project.entry-points."ese.integrations"]
 release_governance_bundle = "release_governance_starter.integration:load_integration"
 
+[project.entry-points."ese.application_bundles"]
+release_governance_application = "release_governance_starter.bundle:load_application_bundle"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"release_governance_starter" = ["ese_pack.yaml", "ese_starter.yaml", "prompts/*.md"]
+"release_governance_starter" = ["ese_pack.yaml", "ese_application.yaml", "ese_starter.yaml", "prompts/*.md"]

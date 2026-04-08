@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 from typer.testing import CliRunner
 
+from ese.application_bundles import ApplicationBundleDefinition
 from ese.artifact_views import ArtifactViewDefinition
 from ese.cli import app, main
 from ese.config_packs import ConfigPackDefinition, PackRoleDefinition
@@ -190,12 +191,37 @@ def test_integrations_command_lists_installed_integrations(monkeypatch) -> None:
     assert "filesystem-evidence" in result.stdout
 
 
+def test_bundles_command_lists_installed_application_bundles(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.cli.discover_application_bundles",
+        lambda: (
+            [
+                ApplicationBundleDefinition(
+                    key="release-governance",
+                    title="Release Governance",
+                    summary="Bundle for release workflows.",
+                    package_name="release_governance_starter",
+                    pack_key="release-governance",
+                )
+            ],
+            [],
+        ),
+    )
+
+    result = runner.invoke(app, ["bundles"])
+
+    assert result.exit_code == 0
+    assert "release-governance" in result.stdout
+    assert "pack: release-governance" in result.stdout
+
+
 def test_extensions_command_lists_supported_surfaces() -> None:
     result = runner.invoke(app, ["extensions"])
 
     assert result.exit_code == 0
     assert "config-packs" in result.stdout
     assert "integrations" in result.stdout
+    assert "application-bundles" in result.stdout
 
 
 def test_no_args_prints_help_when_non_interactive() -> None:
@@ -257,6 +283,23 @@ def test_start_command_runs_pipeline_and_writes_summary(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert (artifacts_dir / "ese_summary.md").exists()
     assert "Pipeline completed" in result.stdout
+
+
+def test_bundle_cli_validate_command_uses_bundle_sdk(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ese.cli.describe_bundle_project",
+        lambda path: {
+            "starter_key": "release-governance",
+            "contract_version": 1,
+            "manifest_path": "/tmp/ese_application.yaml",
+        },
+    )
+
+    result = runner.invoke(app, ["bundle", "validate", ".", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["starter_key"] == "release-governance"
 
 
 def test_start_command_uses_config_artifacts_dir_by_default(tmp_path: Path) -> None:
@@ -534,6 +577,41 @@ def test_task_command_runs_installed_pack_without_hand_written_config(tmp_path: 
     assert (artifacts_dir / "ese_summary.md").exists()
     assert "source: pack 'release-governance'" in result.stdout
     assert "pack 'release-governance'" in result.stdout
+
+
+def test_task_command_runs_installed_bundle_without_hand_written_config(tmp_path: Path, monkeypatch) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    pack = load_pack_definition_from_manifest(
+        Path("starters/release_governance_starter/src/release_governance_starter/ese_pack.yaml")
+    )
+    monkeypatch.setattr("ese.templates.get_config_pack", lambda key: pack)
+    monkeypatch.setattr(
+        "ese.templates.resolve_application_bundle",
+        lambda key: ApplicationBundleDefinition(
+            key="release-governance",
+            title="Release Governance",
+            summary="Bundle for release workflows.",
+            package_name="release_governance_starter",
+            pack_key="release-governance",
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "task",
+            "Review the staged rollout plan for billing cutover",
+            "--bundle",
+            "release-governance",
+            "--artifacts-dir",
+            str(artifacts_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (artifacts_dir / "ese_summary.md").exists()
+    assert "source: bundle 'release-governance'" in result.stdout
+    assert "bundle 'release-governance'" in result.stdout
 
 
 def test_task_command_fails_on_doctor_violations(monkeypatch) -> None:

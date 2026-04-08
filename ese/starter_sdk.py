@@ -28,7 +28,12 @@ from ese.report_exporters import (
     ReportExporterDefinition,
 )
 
+APPLICATION_BUNDLE_MANIFEST_NAME = "ese_application.yaml"
 STARTER_MANIFEST_NAME = "ese_starter.yaml"
+_MANIFEST_NAMES = (
+    APPLICATION_BUNDLE_MANIFEST_NAME,
+    STARTER_MANIFEST_NAME,
+)
 STARTER_CONTRACT_VERSION = 1
 _SKIP_DISCOVERY_PARTS = {
     ".git",
@@ -63,6 +68,7 @@ class StarterProject:
     title: str
     summary: str
     package_name: str
+    pack_key: str
     pack_manifest_path: Path
     policy_checks: tuple[StarterExtensionManifestEntry, ...]
     report_exporters: tuple[StarterExtensionManifestEntry, ...]
@@ -107,7 +113,8 @@ def default_starter_summary(title: str) -> str:
 def _manifest_candidates(root: Path) -> list[Path]:
     return [
         path
-        for path in sorted(root.rglob(STARTER_MANIFEST_NAME))
+        for name in _MANIFEST_NAMES
+        for path in sorted(root.rglob(name))
         if not any(part in _SKIP_DISCOVERY_PARTS for part in path.relative_to(root).parts)
     ]
 
@@ -123,15 +130,28 @@ def resolve_starter_manifest(path: str | Path | None = None) -> Path:
 
     matches = _manifest_candidates(candidate)
     if not matches:
+        names = " or ".join(_MANIFEST_NAMES)
         raise StarterProjectError(
-            f"No {STARTER_MANIFEST_NAME} manifest found under {candidate.resolve()}."
+            f"No {names} manifest found under {candidate.resolve()}."
         )
-    if len(matches) > 1:
-        joined = ", ".join(str(item) for item in matches)
+
+    deduped: dict[Path, Path] = {}
+    for item in matches:
+        deduped.setdefault(item.parent, item)
+        current = deduped[item.parent]
+        if (
+            current.name == STARTER_MANIFEST_NAME
+            and item.name == APPLICATION_BUNDLE_MANIFEST_NAME
+        ):
+            deduped[item.parent] = item
+    unique_matches = list(deduped.values())
+    if len(unique_matches) > 1:
+        joined = ", ".join(str(item) for item in unique_matches)
+        names = " or ".join(_MANIFEST_NAMES)
         raise StarterProjectError(
-            f"Multiple {STARTER_MANIFEST_NAME} manifests found under {candidate.resolve()}: {joined}"
+            f"Multiple {names} manifests found under {candidate.resolve()}: {joined}"
         )
-    return matches[0].resolve()
+    return unique_matches[0].resolve()
 
 
 def _read_manifest_yaml(manifest_path: Path) -> dict[str, Any]:
@@ -196,6 +216,7 @@ def load_starter_project(path: str | Path | None = None) -> StarterProject:
     pack_section = manifest.get("pack")
     if not isinstance(pack_section, dict):
         raise StarterProjectError("starter manifest must include a pack section")
+    pack_key = _clean_key(normalize_non_empty(pack_section.get("key"), label="starter pack key"))
     pack_manifest_file = normalize_non_empty(
         pack_section.get("manifest", PACK_MANIFEST_NAME),
         label="starter pack manifest",
@@ -213,6 +234,7 @@ def load_starter_project(path: str | Path | None = None) -> StarterProject:
         title=title,
         summary=summary,
         package_name=package_name,
+        pack_key=pack_key,
         pack_manifest_path=pack_manifest_path,
         policy_checks=_normalize_manifest_entries(
             manifest.get("policy_checks"),
@@ -242,10 +264,12 @@ def describe_starter_project(path: str | Path | None = None) -> dict[str, Any]:
     return {
         "manifest_path": str(project.manifest_path),
         "starter_key": project.key,
+        "bundle_key": project.key,
         "title": project.title,
         "summary": project.summary,
         "package_name": project.package_name,
         "contract_version": project.contract_version,
+        "pack_key": project.pack_key,
         "pack_manifest_path": str(project.pack_manifest_path),
         "policy_checks": [entry.key for entry in project.policy_checks],
         "report_exporters": [entry.key for entry in project.report_exporters],
@@ -521,11 +545,14 @@ def scaffold_starter_project(
             '[project.entry-points."ese.integrations"]',
             f'{clean_key.replace("-", "_")}_bundle = "{clean_package_name}.integration:load_integration"',
             "",
+            '[project.entry-points."ese.application_bundles"]',
+            f'{clean_key.replace("-", "_")}_application = "{clean_package_name}.bundle:load_application_bundle"',
+            "",
             "[tool.setuptools.packages.find]",
             'where = ["src"]',
             "",
             "[tool.setuptools.package-data]",
-            f'"{clean_package_name}" = ["{PACK_MANIFEST_NAME}", "{STARTER_MANIFEST_NAME}", "prompts/*.md"]',
+            f'"{clean_package_name}" = ["{PACK_MANIFEST_NAME}", "{APPLICATION_BUNDLE_MANIFEST_NAME}", "{STARTER_MANIFEST_NAME}", "prompts/*.md"]',
             "",
         ]
     )
@@ -540,6 +567,7 @@ def scaffold_starter_project(
             "",
             "```bash",
             "pip install -e .",
+            "ese bundle validate .",
             "ese starter validate .",
             "ese pack validate .",
             "```",
@@ -551,6 +579,21 @@ def scaffold_starter_project(
         target / "pyproject.toml": pyproject_text + "\n",
         target / "README.md": readme_text + "\n",
         package_dir / "__init__.py": '"""External ESE starter bundle."""\n',
+        package_dir / "bundle.py": "\n".join(
+            [
+                '"""Entry point for the installed application bundle contract."""',
+                "",
+                "from pathlib import Path",
+                "",
+                "from ese.application_bundles import load_application_bundle_from_manifest",
+                "",
+                "",
+                "def load_application_bundle():",
+                '    """Return the application bundle exported by this package."""',
+                f'    return load_application_bundle_from_manifest(Path(__file__).with_name("{APPLICATION_BUNDLE_MANIFEST_NAME}"))',
+                "",
+            ]
+        ),
         package_dir / "pack.py": "\n".join(
             [
                 '"""Entry point for the external starter pack."""',
@@ -698,6 +741,7 @@ def scaffold_starter_project(
             "Challenge weak assumptions, missing evidence, and delivery blockers.\n"
         ),
         package_dir / PACK_MANIFEST_NAME: yaml.safe_dump(pack_manifest, sort_keys=False),
+        package_dir / APPLICATION_BUNDLE_MANIFEST_NAME: yaml.safe_dump(starter_manifest, sort_keys=False),
         package_dir / STARTER_MANIFEST_NAME: yaml.safe_dump(starter_manifest, sort_keys=False),
     }
 

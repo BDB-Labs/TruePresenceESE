@@ -229,6 +229,7 @@ Each run now writes lineage and assurance metadata into `pipeline_state.json` an
 
 Use `ese roles` to print the built-in starter role examples for framework installs.
 Use `ese packs` to list installed config packs discovered outside the ESE core package.
+Use `ese bundles` to list installed application bundles that group packs with supporting extensions.
 Use `ese doctor --environment` to validate the installed extension environment before a run.
 
 - `architect`: System design, decomposition, and interface contracts.
@@ -249,6 +250,7 @@ Framework installs are not limited to those names. The wizard can now generate s
 ESE no longer carries domain applications in the core repository. Vertical products should live in sibling repos and register packs through the `ese.config_packs` Python entry point group.
 
 Use `ese packs` to confirm what is installed in the current environment. When no packs are installed, the wizard stays in framework mode automatically.
+Use `ese task --pack ...` when you want to run directly against a pack without going through a full vertical bundle.
 
 Scaffold a new external pack project:
 
@@ -296,9 +298,9 @@ Use:
 
 This repository now carries a sample integration plugin in [`examples/release_integration_plugin`](examples/release_integration_plugin).
 
-## Starter Bundles
+## Application Bundles
 
-This repository now includes two installable reference starters that treat ESE as the substrate rather than the application:
+This repository now includes two installable reference application bundles that treat ESE as the substrate rather than the application:
 
 - [`starters/release_governance_starter`](starters/release_governance_starter): release-readiness, go-live review, and evidence publication
 - [`starters/architecture_review_starter`](starters/architecture_review_starter): architecture review, migration risk assessment, and decision briefing
@@ -309,10 +311,24 @@ Recommended operating model:
 
 - keep ESE core generic
 - create a separate repository for each vertical product
-- copy or fork a reference starter into that repo
+- copy or fork a reference application bundle into that repo
 - keep domain prompts, policies, exporters, views, and integrations there
 
-Starter bundle lifecycle:
+Installed bundle discovery:
+
+```bash
+ese bundles
+ese task "Review the staged rollout plan for billing cutover" --bundle release-governance
+```
+
+Application bundle lifecycle:
+
+```bash
+ese bundle validate ./starters/release_governance_starter
+ese bundle test ./starters/release_governance_starter
+```
+
+Legacy starter aliases remain available:
 
 ```bash
 ese starter validate ./starters/release_governance_starter
@@ -329,13 +345,13 @@ That workflow installs:
 
 - ESE core
 - the example pack, policy, reporting, and integration plugins
-- both starter repositories
+- both reference application bundles
 
 It then proves:
 
 - extension discovery
 - environment doctor validation
-- starter bundle validation and smoke testing
+- application bundle validation and smoke testing
 - pack validation and smoke testing
 - task-first execution in demo mode
 - plugin-defined export formats
@@ -432,6 +448,7 @@ ese publish --integration filesystem-evidence --artifacts-dir artifacts --mark-s
 - Config schema + version policy: [`docs/CONFIG_CONTRACT.md`](docs/CONFIG_CONTRACT.md)
 - Extension and pack boundary: [`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md)
 - Commercial packaging and positioning: [`docs/COMMERCIAL_PACKAGING.md`](docs/COMMERCIAL_PACKAGING.md)
+- Systems application delivery vertical report: [`docs/SYSTEMS_APPLICATION_DELIVERY_PLATFORM.md`](docs/SYSTEMS_APPLICATION_DELIVERY_PLATFORM.md)
 - Role report JSON contract: [`docs/ROLE_REPORT_CONTRACT.md`](docs/ROLE_REPORT_CONTRACT.md)
 - Pipeline state and lineage contract: [`docs/PIPELINE_STATE.md`](docs/PIPELINE_STATE.md)
 - Release evidence guidance: [`docs/RELEASE.md`](docs/RELEASE.md)

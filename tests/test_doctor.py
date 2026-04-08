@@ -243,6 +243,7 @@ def test_doctor_environment_reports_broken_extensions(monkeypatch) -> None:
     monkeypatch.setattr("ese.doctor.discover_external_report_exporters", lambda: ([], []))
     monkeypatch.setattr("ese.doctor.discover_artifact_views", lambda: ([], []))
     monkeypatch.setattr("ese.doctor.discover_integrations", lambda: ([], []))
+    monkeypatch.setattr("ese.doctor.discover_application_bundles", lambda: ([], []))
 
     ok, violations, report = evaluate_doctor_environment()
 
@@ -250,3 +251,25 @@ def test_doctor_environment_reports_broken_extensions(monkeypatch) -> None:
     assert "[environment:config_packs] Failed to load config pack 'broken_pack': missing manifest" in violations
     assert report["config_packs"]["failures"][0]["entry_point"] == "broken_pack"
     assert "Config Packs: 0 installed, 1 broken" in render_doctor_environment_text(report)
+
+
+def test_doctor_environment_reports_installed_application_bundles(monkeypatch) -> None:
+    monkeypatch.setattr("ese.doctor.discover_config_packs", lambda: ([], []))
+    monkeypatch.setattr("ese.doctor.discover_policy_checks", lambda: ([], []))
+    monkeypatch.setattr("ese.doctor.discover_external_report_exporters", lambda: ([], []))
+    monkeypatch.setattr("ese.doctor.discover_artifact_views", lambda: ([], []))
+    monkeypatch.setattr("ese.doctor.discover_integrations", lambda: ([], []))
+    monkeypatch.setattr(
+        "ese.doctor.discover_application_bundles",
+        lambda: (
+            [type("Bundle", (), {"key": "release-governance"})()],
+            [],
+        ),
+    )
+
+    ok, violations, report = evaluate_doctor_environment()
+
+    assert ok
+    assert violations == []
+    assert report["application_bundles"]["installed"] == ["release-governance"]
+    assert "Application Bundles: 1 installed, 0 broken" in render_doctor_environment_text(report)

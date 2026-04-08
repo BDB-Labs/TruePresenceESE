@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple, cast
 
+from ese.application_bundles import discover_application_bundles
 from ese.artifact_views import discover_artifact_views
 from ese.config import (
     ConfigValidationError,
@@ -353,6 +354,7 @@ def evaluate_doctor_environment() -> tuple[bool, list[str], dict[str, Any]]:
     exporters, exporter_failures = discover_external_report_exporters()
     views, view_failures = discover_artifact_views()
     integrations, integration_failures = discover_integrations()
+    bundles, bundle_failures = discover_application_bundles()
 
     report = {
         "config_packs": {
@@ -390,6 +392,13 @@ def evaluate_doctor_environment() -> tuple[bool, list[str], dict[str, Any]]:
                 for failure in integration_failures
             ],
         },
+        "application_bundles": {
+            "installed": [bundle.key for bundle in bundles],
+            "failures": [
+                {"entry_point": failure.entry_point, "error": failure.error}
+                for failure in bundle_failures
+            ],
+        },
     }
 
     violations: list[str] = []
@@ -399,6 +408,7 @@ def evaluate_doctor_environment() -> tuple[bool, list[str], dict[str, Any]]:
         ("report_exporters", "report exporter"),
         ("artifact_views", "artifact view"),
         ("integrations", "integration"),
+        ("application_bundles", "application bundle"),
     ):
         surface = cast(dict[str, Any], report[surface_key])
         failures = cast(list[dict[str, str]], surface["failures"])
@@ -419,6 +429,7 @@ def render_doctor_environment_text(report: dict[str, Any]) -> str:
         ("report_exporters", "Report Exporters"),
         ("artifact_views", "Artifact Views"),
         ("integrations", "Integrations"),
+        ("application_bundles", "Application Bundles"),
     ):
         surface = report.get(surface_key) or {}
         installed = surface.get("installed") or []

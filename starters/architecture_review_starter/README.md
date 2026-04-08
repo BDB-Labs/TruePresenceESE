@@ -19,7 +19,9 @@ pip install .
 ## Use
 
 ```bash
+ese bundle validate .
 ese starter validate .
+ese bundles
 ese packs
 ese policies
 ese views
@@ -31,7 +33,7 @@ Run an architecture review workflow:
 
 ```bash
 ese task "Review the service-boundary changes for the billing migration" \
-  --pack architecture-review \
+  --bundle architecture-review \
   --execution-mode demo \
   --artifacts-dir artifacts
 ```

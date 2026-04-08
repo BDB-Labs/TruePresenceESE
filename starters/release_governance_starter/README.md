@@ -19,7 +19,9 @@ pip install .
 ## Use
 
 ```bash
+ese bundle validate .
 ese starter validate .
+ese bundles
 ese packs
 ese policies
 ese exporters
@@ -27,11 +29,11 @@ ese views
 ese integrations
 ```
 
-Generate a portable starter config:
+Generate a portable bundle-backed config:
 
 ```bash
 ese task "Review the staged rollout plan for billing cutover" \
-  --pack release-governance \
+  --bundle release-governance \
   --execution-mode demo \
   --artifacts-dir artifacts
 ```

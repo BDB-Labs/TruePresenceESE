@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ese.application_bundles import (
+    APPLICATION_BUNDLE_CONTRACT_VERSION,
+    APPLICATION_BUNDLE_ENTRY_POINT_GROUP,
+)
 from ese.artifact_views import (
     ARTIFACT_VIEW_CONTRACT_VERSION,
     ARTIFACT_VIEW_ENTRY_POINT_GROUP,
@@ -59,5 +63,11 @@ def list_extension_surfaces() -> list[ExtensionSurfaceDefinition]:
             title="Integrations",
             entry_point_group=INTEGRATION_ENTRY_POINT_GROUP,
             contract_version=INTEGRATION_CONTRACT_VERSION,
+        ),
+        ExtensionSurfaceDefinition(
+            key="application-bundles",
+            title="Application Bundles",
+            entry_point_group=APPLICATION_BUNDLE_ENTRY_POINT_GROUP,
+            contract_version=APPLICATION_BUNDLE_CONTRACT_VERSION,
         ),
     ]

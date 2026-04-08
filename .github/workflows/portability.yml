@@ -61,6 +61,7 @@ jobs:
           uv run ese exporters
           uv run ese views
           uv run ese integrations
+          uv run ese bundles
 
       - name: Validate portable packs
         run: |
@@ -68,10 +69,14 @@ jobs:
           uv run ese pack test examples/release_ops_pack
           uv run ese starter validate starters/release_governance_starter
           uv run ese starter test starters/release_governance_starter
+          uv run ese bundle validate starters/release_governance_starter
+          uv run ese bundle test starters/release_governance_starter
           uv run ese pack validate starters/release_governance_starter
           uv run ese pack test starters/release_governance_starter
           uv run ese starter validate starters/architecture_review_starter
           uv run ese starter test starters/architecture_review_starter
+          uv run ese bundle validate starters/architecture_review_starter
+          uv run ese bundle test starters/architecture_review_starter
           uv run ese pack validate starters/architecture_review_starter
           uv run ese pack test starters/architecture_review_starter
 
@@ -81,6 +86,11 @@ jobs:
             --pack release-governance \
             --execution-mode demo \
             --artifacts-dir portability-artifacts
+
+          uv run ese task "Review the staged rollout plan for billing cutover" \
+            --bundle release-governance \
+            --execution-mode demo \
+            --artifacts-dir portability-bundle-artifacts
 
           uv run ese task "Review the service-boundary changes for the billing migration" \
             --pack architecture-review \
@@ -127,6 +137,7 @@ jobs:
       - name: Assert published outputs exist
         run: |
           test -f portability-artifacts/ese_summary.md
+          test -f portability-bundle-artifacts/ese_summary.md
           test -f portability-architecture-artifacts/ese_summary.md
           test -f portability-artifacts/release_gates.csv
           test -f portability-architecture-artifacts/blockers.csv

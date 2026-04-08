@@ -9,6 +9,7 @@ Supported external surfaces all target contract version `1` in this build:
 - `ese.report_exporters`
 - `ese.artifact_views`
 - `ese.integrations`
+- `ese.application_bundles`
 
 Use `ese extensions` to inspect the supported surface names, entry point groups, and contract versions from the installed CLI.
 Use `ese doctor --environment` to validate the installed extension environment before a run starts.
@@ -246,19 +247,53 @@ Packaging example:
 filesystem_evidence = "my_integration_plugin.integration:load_integration"
 ```
 
-## Starter repository model
+## Application bundles
 
-Starter bundles are validated through a manifest named `ese_starter.yaml`. The manifest is the source of truth for a vertical bundle's pack, policy checks, exporters, views, and integrations, even though Python entry points are still required for runtime discovery.
+Application bundles are discovered through the Python entry point group `ese.application_bundles`.
+They are described locally through a manifest named `ese_application.yaml`. The older `ese_starter.yaml` filename remains supported as a compatibility alias.
 
-Starter SDK workflow:
+Each installed application bundle exposes:
+
+- `key`
+- `title`
+- `summary`
+- `package_name`
+- `pack_key`
+- `policy_checks`
+- `report_exporters`
+- `artifact_views`
+- `integrations`
+- optional `contract_version` (defaults to `1`)
+
+Installed bundle discovery and task execution:
 
 ```bash
-ese starter init ../my-vertical --key my-vertical
-ese starter validate ../my-vertical
-ese starter test ../my-vertical
+ese bundles
+ese task "Review the staged rollout plan for billing cutover" --bundle release-governance
 ```
 
-Starter repositories should be treated as real installable packages that happen to use ESE as their foundation.
+Packaging example:
+
+```toml
+[project.entry-points."ese.application_bundles"]
+release_governance_application = "release_governance_starter.bundle:load_application_bundle"
+```
+
+## Bundle SDK model
+
+Application bundles are validated through `ese_application.yaml` and surfaced locally through the bundle SDK commands.
+
+Bundle SDK workflow:
+
+```bash
+ese bundle init ../my-vertical --key my-vertical
+ese bundle validate ../my-vertical
+ese bundle test ../my-vertical
+```
+
+Legacy `ese starter ...` commands remain available as compatibility aliases.
+
+Application-bundle repositories should be treated as real installable packages that happen to use ESE as their foundation.
 
 Recommended layout:
 
@@ -268,19 +303,21 @@ starter/
   README.md
   src/my_vertical/
     __init__.py
+    bundle.py
     pack.py
     policy.py
     exporters.py
     views.py
     integration.py
     ese_pack.yaml
+    ese_application.yaml
     ese_starter.yaml
     prompts/
       analyst.md
       reviewer.md
 ```
 
-Starter manifest shape:
+Bundle manifest shape:
 
 ```yaml
 contract_version: 1
@@ -312,10 +349,10 @@ integrations:
 Recommended operating model:
 
 - keep ESE core generic
-- put vertical prompts, packs, policies, and integrations in the starter or sibling app repo
-- version each starter independently of ESE core
-- prove portability in CI by installing the starter into a clean environment
-- let future products fork or clone the starter, not the ESE core repo
+- put vertical prompts, packs, policies, and integrations in the application bundle or sibling app repo
+- version each bundle independently of ESE core
+- prove portability in CI by installing the bundle into a clean environment
+- let future products fork or clone the bundle, not the ESE core repo
 
 ## Operating model
 

@@ -8,7 +8,14 @@ from typing import Any, Callable
 import typer
 import yaml
 
+from ese.application_bundles import discover_application_bundles
 from ese.artifact_views import discover_artifact_views
+from ese.bundle_sdk import (
+    BundleProjectError,
+    describe_bundle_project,
+    scaffold_bundle_project,
+    smoke_test_bundle_project,
+)
 from ese.config import ConfigValidationError, load_config, write_config
 from ese.config_packs import discover_config_packs
 from ese.dashboard import serve_dashboard
@@ -66,8 +73,10 @@ from ese.templates import (
 )
 
 app = typer.Typer(help="Ensemble Software Engineering (ESE) CLI")
+bundle_app = typer.Typer(help="Scaffold and validate external ESE application bundles")
 pack_app = typer.Typer(help="Scaffold and validate external ESE config packs")
 starter_app = typer.Typer(help="Scaffold and validate external ESE starter bundles")
+app.add_typer(bundle_app, name="bundle")
 app.add_typer(pack_app, name="pack")
 app.add_typer(starter_app, name="starter")
 
@@ -128,6 +137,10 @@ def _preflight_source_label(cfg: dict[str, Any]) -> str:
     install_profile = cfg.get("install_profile") or {}
     if isinstance(install_profile, dict):
         kind = str(install_profile.get("kind") or "").strip().lower()
+        if kind == "bundle":
+            bundle_key = str(install_profile.get("bundle") or cfg.get("bundle_key") or "").strip()
+            if bundle_key:
+                return f"bundle '{bundle_key}'"
         if kind == "pack":
             pack_key = str(install_profile.get("pack") or cfg.get("pack_key") or "").strip()
             if pack_key:
@@ -139,6 +152,9 @@ def _preflight_source_label(cfg: dict[str, Any]) -> str:
         if kind == "framework":
             return "framework config"
 
+    bundle_key = str(cfg.get("bundle_key") or "").strip()
+    if bundle_key:
+        return f"bundle '{bundle_key}'"
     pack_key = str(cfg.get("pack_key") or "").strip()
     if pack_key:
         return f"pack '{pack_key}'"
@@ -409,6 +425,27 @@ def list_installed_integrations():
             typer.echo(f"  - {failure.entry_point}: {failure.error}")
 
 
+@app.command("bundles")
+def list_bundles():
+    """List installed external ESE application bundles."""
+    bundles, failures = discover_application_bundles()
+    if not bundles and not failures:
+        typer.echo("No application bundles installed.")
+        return
+
+    if bundles:
+        typer.echo("Installed application bundles:")
+        for bundle in bundles:
+            typer.echo(
+                f"  - {bundle.key}: {bundle.title} - {bundle.summary} "
+                f"(pack: {bundle.pack_key})"
+            )
+    if failures:
+        typer.echo("Broken application bundles:")
+        for failure in failures:
+            typer.echo(f"  - {failure.entry_point}: {failure.error}")
+
+
 @app.command("extensions")
 def list_extensions(json_output: bool = typer.Option(False, "--json", help="Emit extension surface metadata as JSON")):
     """List the supported ESE extension surfaces and contract versions."""
@@ -432,6 +469,88 @@ def list_extensions(json_output: bool = typer.Option(False, "--json", help="Emit
             f"{surface['key']}: contract v{surface['contract_version']} "
             f"via {surface['entry_point_group']}"
         )
+
+
+@bundle_app.command("init")
+def bundle_init(
+    path: str = typer.Argument(..., help="Target directory for the external application bundle"),
+    key: str = typer.Option("", help="Stable bundle key. Defaults from the directory name."),
+    title: str | None = typer.Option(None, help="Human-friendly bundle title"),
+    summary: str | None = typer.Option(None, help="One-line description for the bundle"),
+    package_name: str | None = typer.Option(None, "--package", help="Python package name for the generated scaffold"),
+    preset: str = typer.Option("strict", help="Framework preset used by the bundle pack"),
+    goal_profile: str | None = typer.Option(None, help="Goal profile override. Defaults to high-quality."),
+    force: bool = typer.Option(False, "--force", help="Allow writing into a non-empty target directory"),
+):
+    """Scaffold a portable external ESE application bundle."""
+    target = Path(path).expanduser()
+    try:
+        project = scaffold_bundle_project(
+            target,
+            starter_key=(key or "").strip() or target.name,
+            title=title,
+            summary=summary,
+            package_name=package_name,
+            preset=preset,
+            goal_profile=goal_profile,
+            force=force,
+        )
+    except BundleProjectError as err:
+        typer.echo(f"❌ ESE bundle init failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    typer.echo(
+        "✅ Scaffolded external application bundle "
+        f"'{project.key}' at {target.resolve()} using contract v{project.contract_version}."
+    )
+
+
+@bundle_app.command("validate")
+def bundle_validate(
+    path: str = typer.Argument(".", help="Bundle project directory or ese_application.yaml manifest"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable validation metadata"),
+):
+    """Validate an external ESE application bundle manifest and referenced extension files."""
+    try:
+        report = describe_bundle_project(path)
+    except BundleProjectError as err:
+        typer.echo(f"❌ ESE bundle validate failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    if json_output:
+        typer.echo(json.dumps(report, indent=2))
+        return
+
+    typer.echo(
+        "✅ Application bundle valid: "
+        f"{report.get('bundle_key', report['starter_key'])} (contract v{report['contract_version']})"
+    )
+    typer.echo(f"Manifest: {report['manifest_path']}")
+
+
+@bundle_app.command("test")
+def bundle_test(
+    path: str = typer.Argument(".", help="Bundle project directory or ese_application.yaml manifest"),
+    provider: str = typer.Option("openai", help="Provider preset for the bundle pack smoke test"),
+    model: str | None = typer.Option(None, help="Optional model override for the bundle pack smoke test"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable smoke-test metadata"),
+):
+    """Load an application bundle and smoke-test its pack plus extension loaders."""
+    try:
+        report = smoke_test_bundle_project(path, provider=provider, model=model)
+    except BundleProjectError as err:
+        typer.echo(f"❌ ESE bundle test failed: {err}")
+        raise typer.Exit(code=2) from err
+
+    if json_output:
+        typer.echo(json.dumps(report, indent=2))
+        return
+
+    typer.echo(
+        "✅ Application bundle smoke test passed: "
+        f"{report.get('bundle_key', report['starter_key'])} via {report['provider']} / {report['model']}"
+    )
+    typer.echo(f"Manifest: {report['manifest_path']}")
 
 
 @pack_app.command("init")
@@ -733,6 +852,7 @@ def task(
     scope: str = typer.Argument(..., help="Project scope or task to run"),
     template: str = typer.Option("", help="Opinionated task template (defaults from scope if omitted)"),
     pack: str = typer.Option("", "--pack", help="Installed config pack key for pack-driven task runs"),
+    bundle: str = typer.Option("", "--bundle", help="Installed application bundle key for bundle-driven task runs"),
     provider: str = typer.Option("openai", help="Provider preset"),
     execution_mode: str = typer.Option(AUTO_EXECUTION_MODE, help="auto, demo, or live"),
     artifacts_dir: str = typer.Option("artifacts", help="Directory for run artifacts"),
@@ -752,11 +872,13 @@ def task(
     """Run ESE from a task description without hand-authoring config first."""
     chosen_template = (template or "").strip()
     chosen_pack = (pack or "").strip()
+    chosen_bundle = (bundle or "").strip()
     try:
         cfg = build_task_config(
             scope=scope,
             template_key=chosen_template or None,
             pack_key=chosen_pack or None,
+            bundle_key=chosen_bundle or None,
             provider=provider,
             execution_mode=execution_mode,
             artifacts_dir=artifacts_dir,
@@ -777,7 +899,9 @@ def task(
         effective_artifacts_dir = _effective_artifacts_dir(cfg, artifacts_dir)
         config_snapshot_path = str(Path(effective_artifacts_dir) / CONFIG_SNAPSHOT_NAME)
         install_profile = cfg.get("install_profile") or {}
-        if install_profile.get("kind") == "pack":
+        if install_profile.get("kind") == "bundle":
+            source_label = f"bundle '{install_profile.get('bundle')}'"
+        elif install_profile.get("kind") == "pack":
             source_label = f"pack '{install_profile.get('pack')}'"
         else:
             source_label = f"template '{cfg.get('template_key', recommend_template_for_scope(scope))}'"
