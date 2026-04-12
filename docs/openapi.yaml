@@ -1,0 +1,310 @@
+openapi: 3.0.3
+info:
+  title: TruePresence ESE API
+  description: |
+    TruePresence Entity Synthesis Engine (ESE) API provides bot detection and human verification
+    through a multi-agent ensemble system. The API supports two modes:
+    
+    - **SDK Mode**: Standard integration for web and mobile applications
+    - **Gatekeeper Mode**: High-security deployment with enhanced challenge verification
+    
+    ## Core Features
+    
+    - Real-time bot detection with confidence scores
+    - Multi-role ensemble synthesis (liveness, adversarial, mediation, relay)
+    - Adaptive weighting based on detection performance
+    - Cross-session bot clustering via Identity Graph
+    - Optional challenge verification for high-risk scenarios
+    - Distributed Redis-backed session management
+    
+    ## Authentication
+    
+    Currently uses session-based authentication via `session_id` parameter.
+    Future versions will include API key authentication.
+  version: 1.0.0
+  contact:
+    name: BDB-Labs
+    url: https://github.com/BDB-Labs/TruePresenceESE
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+  - url: https://api.truepresence.io/v1
+    description: Production server
+
+paths:
+  /session/create:
+    post:
+      summary: Create a new session
+      description: Create a new TruePresence session for tracking user behavior
+      tags:
+        - Sessions
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                assurance_level:
+                  type: string
+                  enum: [A1, A2, A3, A4]
+                  default: A1
+                  description: Assurance level (A1=lowest, A4=highest)
+      responses:
+        '200':
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                  assurance_level:
+                    type: string
+
+  /v1/evaluate:
+    post:
+      summary: Evaluate event for bot detection
+      description: |
+        Main endpoint for evaluating user events against the bot detection system.
+        Supports both streaming events (SDK mode) and batch evaluation (gatekeeper mode).
+      tags:
+        - Evaluation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateRequest'
+      responses:
+        '200':
+          description: Evaluation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateResponse'
+        '400':
+          description: Invalid request parameters
+        '422':
+          description: Validation error
+
+  /health:
+    get:
+      summary: Health check
+      description: Check API and orchestrator health status
+      tags:
+        - System
+      responses:
+        '200':
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  orchestrator:
+                    type: object
+
+  /v1/sessions/{session_id}/cluster:
+    get:
+      summary: Get session cluster
+      description: Get all connected sessions in the identity graph
+      tags:
+        - Sessions
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cluster information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                  cluster:
+                    type: array
+                    items:
+                      type: string
+
+  /v1/sessions/{session_id}/reset:
+    post:
+      summary: Reset session
+      description: Reset session memory and start fresh
+      tags:
+        - Sessions
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session reset successfully
+
+components:
+  schemas:
+    EventSignals:
+      type: object
+      required:
+        - event_type
+        - timestamp
+        - payload
+      properties:
+        event_type:
+          type: string
+          description: Type of event (key_timing, mouse_move, clipboard, challenge_response, etc.)
+        timestamp:
+          type: number
+          description: Unix timestamp of event
+        payload:
+          type: object
+          description: Event-specific payload data
+        features:
+          type: object
+          description: Extracted behavioral features
+          properties:
+            mouse_variance:
+              type: number
+            typing_speed:
+              type: number
+            timing_consistency:
+              type: number
+            entropy:
+              type: number
+
+    ChallengeResponse:
+      type: object
+      required:
+        - challenge_id
+        - response
+      properties:
+        challenge_id:
+          type: string
+          description: ID of the challenge being responded to
+        response:
+          type: string
+          description: User's response to the challenge
+        response_time_ms:
+          type: number
+          description: Time taken to respond in milliseconds
+
+    EvaluateRequest:
+      type: object
+      required:
+        - session_id
+        - event
+      properties:
+        mode:
+          type: string
+          enum: [sdk, gatekeeper]
+          default: sdk
+          description: Evaluation mode (sdk=normal, gatekeeper=high security)
+        session_id:
+          type: string
+          description: Unique session identifier
+        event:
+          $ref: '#/components/schemas/EventSignals'
+        context:
+          type: object
+          description: Context information
+          properties:
+            platform:
+              type: string
+              enum: [web, mobile, desktop, api]
+            ip_address:
+              type: string
+            user_agent:
+              type: string
+        challenge_responses:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChallengeResponse'
+
+    RoleReasoning:
+      type: object
+      properties:
+        role:
+          type: string
+        reasoning:
+          type: string
+
+    TemporalSignals:
+      type: object
+      properties:
+        drift:
+          type: number
+          description: Temporal drift score (higher = more variable timing)
+        cross_session_risk:
+          type: number
+          description: Risk score from cross-session analysis (0-1)
+
+    EvaluateResponse:
+      type: object
+      required:
+        - human_probability
+        - bot_probability
+        - confidence
+        - decision
+        - risk_factors
+        - reasoning_trace
+        - temporal_signals
+        - session_id
+      properties:
+        human_probability:
+          type: number
+          format: float
+          description: Probability user is human (0-1)
+          minimum: 0
+          maximum: 1
+        bot_probability:
+          type: number
+          format: float
+          description: Probability user is bot (0-1)
+          minimum: 0
+          maximum: 1
+        confidence:
+          type: number
+          format: float
+          description: Confidence in the decision (0-1)
+          minimum: 0
+          maximum: 1
+        decision:
+          type: string
+          enum: [allow, challenge, block, review]
+          description: |
+            - allow: User appears human, grant access
+            - challenge: Uncertain, issue verification challenge
+            - block: High confidence bot, deny access
+            - review: Manual review recommended
+        risk_factors:
+          type: array
+          items:
+            type: string
+          description: List of detected risk factors
+        reasoning_trace:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-role reasoning and decision factors
+        temporal_signals:
+          $ref: '#/components/schemas/TemporalSignals'
+        session_id:
+          type: string
+          description: Session ID used for evaluation
+
+  securitySchemes: []

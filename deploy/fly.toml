@@ -1,0 +1,18 @@
+app = "truepresence-telegram"
+primary_region = "iad"
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+
+[http_service]
+  port = 8000
+  force_https = true
+
+[[vm]]
+  size = "shared-cpu-256m"
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
+
+[environment]
+  PORT = "8000"

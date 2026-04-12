@@ -3,17 +3,21 @@ from collections import defaultdict
 from typing import Dict, List
 import json
 import uuid
+import time
 from truepresence.ese_runtime import ESEEnsembleRuntime
 from truepresence.challenges.validator import ChallengeValidator
+from truepresence.redteam.evaluate import RedTeamEvaluator
 
 router = APIRouter()
 
 # Initialize Core Components
 ensemble = ESEEnsembleRuntime()
 validator = ChallengeValidator()
+redteam_evaluator = RedTeamEvaluator()
 
 connections: Dict[str, List[WebSocket]] = defaultdict(list)
 session_events: Dict[str, List[dict]] = defaultdict(list)
+session_modes: Dict[str, str] = defaultdict(str)
 
 CHALLENGE_PROMPTS = [
     "Without pausing, type the last word you just read.",
@@ -27,9 +31,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
     connections[session_id].append(websocket)
     
+    # Get session mode (default to "production" if not set)
+    session_mode = session_modes.get(session_id, "production")
+    
     await websocket.send_json({
         "type": "welcome",
-        "data": {"session_id": session_id, "message": "TruePresence Connected to ESE Ensemble"}
+        "data": {"session_id": session_id, "message": "TruePresence Connected to ESE Ensemble", "mode": session_mode}
     })
     
     try:
@@ -37,12 +44,17 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             data = await websocket.receive_text()
             event = json.loads(data)
             
+            # Handle mode setting (for test/gatekeeper modes)
+            if event.get("event_type") == "set_mode":
+                session_mode = event.get("payload", {}).get("mode", "production")
+                session_modes[session_id] = session_mode
+                continue
+            
             # 1. Handle Challenge Responses (Phase 2)
             if event.get("event_type") == "challenge_response":
                 response_text = event.get("payload", {}).get("text", "")
                 val_result = validator.validate_response(session_id, response_text)
                 
-                # Feed challenge result back as a special event for ESE to analyze
                 event = {
                     "event_type": "challenge_result",
                     "payload": val_result
@@ -50,9 +62,25 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # 2. Store and Evaluate via Ensemble (Phase 1)
             session_events[session_id].append(event)
-            # Convert dict events to Pydantic Event objects if necessary, 
-            # but ensemble_runtime handles them as a list for now.
             result = ensemble.evaluate(session_id, session_events[session_id])
+            
+            # 3. Self-Evaluation for Test Mode (Red Team Integration)
+            if session_mode == "test" and event.get("attack_type"):
+                # Evaluate as attack and compute reward
+                attack_result = redteam_evaluator.run_attack(
+                    test_name=f"ws_attack_{session_id}",
+                    events=[event],
+                    ground_truth=True  # Known attack in test mode
+                )
+                
+                # Send reward feedback to client for monitoring
+                await websocket.send_json({
+                    "type": "reward_update",
+                    "data": {
+                        "reward": attack_result.get("reward", 0.0),
+                        "performance": redteam_evaluator.get_performance()
+                    }
+                })
             
             # 3. Trust Update
             await websocket.send_json({"type": "trust_update", "data": result})

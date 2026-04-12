@@ -1,0 +1,38 @@
+{
+  "$schema": "https://railway.app/schema.json",
+  "name": "TruePresence-Telegram",
+  "plugins": [],
+  "environments": {
+    "production": {
+      "variables": {
+        "PORT": "8000"
+      }
+    }
+  },
+  "services": {
+    "truepresence": {
+      "build": {
+        "context": ".",
+        "dockerfile": "deploy/Dockerfile"
+      },
+      "healthcheck": {
+        "command": "python -c \"import requests; r = requests.get('http://localhost:8000/health'); exit(0 if r.status_code == 200 else 1)\"",
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3
+      },
+      "port": 8000,
+      "variables": [
+        {
+          "key": "TELEGRAM_BOT_TOKEN",
+          "generated": false,
+          "required": true
+        },
+        {
+          "key": "PORT",
+          "value": "8000"
+        }
+      ]
+    }
+  }
+}

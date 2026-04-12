@@ -18,6 +18,16 @@ challenge_settings:
   default_ttl: 15.0
   max_attempts: 3
 
+challenge_profile:
+  enabled: false
+  risk_threshold: 0.7
+  questions:
+    - "Type the third letter of the word 'hello'"
+    - "Count backward from 10 to 1"
+    - "Type your favorite color"
+    - "Spell the word 'presence' backwards"
+    - "Type the current day of the week"
+
 ensemble:
   roles:
     - liveness_analyst

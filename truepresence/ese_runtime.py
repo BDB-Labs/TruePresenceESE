@@ -2,32 +2,43 @@ import yaml
 from typing import Dict, Any, List
 from core.events import Event
 from truepresence.adapter.evidence_adapter import EvidenceAdapter
-from truepresence.core.roles.liveness import LivenessAnalyst
-from truepresence.core.roles.relay import RelayAnalyst
-from truepresence.core.roles.mediation import MediationAnalyst
-from truepresence.core.roles.adversarial import AdversarialReviewer
-from truepresence.core.roles.synthesizer import TrustSynthesizer
+from truepresence.core.roles.base import (
+    LivenessRole, RelayRole, MediationRole, AdversarialRole, SynthesizerRole
+)
 
 class ESEEnsembleRuntime:
     """
     The True ESE Integration: Orchestrates the role-based pipeline.
+    
+    Uses unified Role interface for consistent method signatures.
     """
     def __init__(self, config_path: str = "config.yaml"):
         with open(config_path, "r") as f:
             self.config = yaml.safe_load(f)
         
         self.adapter = EvidenceAdapter(self.config)
-        self.liveness_analyst = LivenessAnalyst()
-        self.relay_analyst = RelayAnalyst()
-        self.mediation_analyst = MediationAnalyst()
-        self.adversarial_reviewer = AdversarialReviewer()
-        self.synthesizer = TrustSynthesizer()
-
+        
+        # Initialize roles using unified interface
+        self.liveness_analyst = LivenessRole()
+        self.relay_analyst = RelayRole()
+        self.mediation_analyst = MediationRole()
+        self.adversarial_reviewer = AdversarialRole()
+        self.synthesizer = SynthesizerRole()
+        
+        # Map for ESE compatibility
+        self._role_map = {
+            "liveness": self.liveness_analyst,
+            "relay": self.relay_analyst,
+            "mediation": self.mediation_analyst,
+            "adversarial": self.adversarial_reviewer,
+            "synthesizer": self.synthesizer
+        }
+        
     def evaluate(self, session_id: str, events: List[Event]) -> Dict[str, Any]:
         # 1. Adapter: Raw Events -> Evidence Bundle
         evidence = self.adapter.transform(session_id, events)
         
-        # 2. Specialists: Evidence -> Individual Findings
+        # 2. Specialists: Evidence -> Individual Findings (using unified interface)
         analysts = [
             self.liveness_analyst.analyze(evidence),
             self.relay_analyst.analyze(evidence),
