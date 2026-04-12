@@ -141,17 +141,30 @@ class LivenessRole(Role):
 
 
 class AdversarialRole(Role):
-    """Adversarial review role - hunts for 'too perfect' signals."""
+    """
+    Adversarial review role - hunts for 'too perfect' signals and specific threats.
+    
+    Detects:
+    - Mirrors/Userbots (spam amplification)
+    - Crypto Miners (resource abuse)
+    - DMCA Violations (copyright infringement)
+    - Torrent Aggregators (pirate content)
+    - VNC/Virtual Desktops (remote abuse)
+    - Illegal Content (general)
+    """
     
     def __init__(self):
         super().__init__()
         self._role_name = "adversarial"
     
     def evaluate(self, evidence: Dict[str, Any], session: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Evaluate for adversarial/bot signals."""
+        """Evaluate for adversarial/bot signals and specific threat categories."""
         try:
             signals = evidence.get("signals", {})
             findings = []
+            threat_categories = []
+            
+            # ===== STANDARD BOT DETECTION =====
             
             # Check optimization risk (too perfect timing)
             opt_risk = signals.get("optimization_risk", 0.0)
@@ -169,13 +182,86 @@ class AdversarialRole(Role):
             if mouse_entropy < 0.1:
                 findings.append("low_interaction_entropy")
             
-            # Calculate bot probability based on risks
-            severity = min(1.0, len(findings) * 0.3) if findings else 0.0
+            # ===== SPECIFIC THREAT DETECTION =====
+            
+            # 1. Mirror/Userbot Detection
+            # - High message velocity + identical messages across groups
+            # - Same content posted to multiple groups in short time
+            message_velocity = signals.get("message_velocity", 0)
+            content_similarity = signals.get("content_similarity", 0)
+            
+            if message_velocity > 50 and content_similarity > 0.9:
+                findings.append("mirrored_content_detected")
+                threat_categories.append("mirrors_userbots")
+            
+            # 2. Crypto Miner Detection
+            # - High CPU usage patterns, computational resource abuse
+            # - Scripts running in background, unusual network activity
+            cpu_usage = signals.get("cpu_usage", 0)
+            network_entropy = signals.get("network_entropy", 0.5)
+            
+            if cpu_usage > 80 and network_entropy < 0.3:
+                findings.append("high_resource_usage_pattern")
+                threat_categories.append("crypto_miners")
+            
+            # 3. DMCA Protected Content Detection
+            # - Sharing known copyrighted content
+            # - Links to known piracy sites
+            copyright_signals = signals.get("copyright_indicators", [])
+            if copyright_signals:
+                findings.append("copyright_content_detected")
+                threat_categories.append("dmca_violations")
+            
+            # 4. Torrent Aggregator Detection
+            # - Magnet links, torrent file transfers
+            # - High bandwidth with specific peer-to-peer patterns
+            torrent_indicators = signals.get("torrent_indicators", 0)
+            p2p_pattern = signals.get("p2p_pattern", 0)
+            
+            if torrent_indicators > 0.5 or p2p_pattern > 0.7:
+                findings.append("torrent_activity_detected")
+                threat_categories.append("torrent_aggregators")
+            
+            # 5. VNC/Virtual Desktop Detection
+            # - Remote desktop activity, VNC ports
+            # - Automated screen capture patterns
+            vnc_indicators = signals.get("vnc_indicators", 0)
+            remote_access_pattern = signals.get("remote_access_pattern", 0)
+            
+            if vnc_indicators > 0.3 or remote_access_pattern > 0.6:
+                findings.append("remote_access_detected")
+                threat_categories.append("vnc_virtual_desktops")
+            
+            # 6. Illegal Content Detection
+            # - Match against known illegal content patterns
+            # - Drugs, weapons, fraud indicators
+            illegal_indicators = signals.get("illegal_indicators", [])
+            fraud_pattern = signals.get("fraud_pattern", 0)
+            
+            if illegal_indicators or fraud_pattern > 0.8:
+                findings.append("illegal_content_detected")
+                threat_categories.append("illegal_content")
+            
+            # ===== SEVERITY CALCULATION =====
+            
+            # Base severity from findings
+            base_severity = len(findings) * 0.15
+            
+            # Boost for confirmed threat categories
+            threat_boost = len(threat_categories) * 0.2
+            
+            # Combine (cap at 1.0)
+            severity = min(1.0, base_severity + threat_boost)
+            
+            # For confirmed illegal categories, max severity
+            if "illegal_content" in threat_categories:
+                severity = 1.0
+            
             bot_probability = severity
             human_probability = 1.0 - bot_probability
             
-            # Confidence increases with more findings
-            confidence = min(1.0, 0.5 + severity)
+            # Confidence increases with more findings and confirmed threats
+            confidence = min(1.0, 0.5 + (severity * 0.5))
             
             self._last_confidence = confidence
             self._last_error = None
@@ -186,13 +272,34 @@ class AdversarialRole(Role):
                 "bot_probability": bot_probability,
                 "confidence": confidence,
                 "findings": findings,
+                "threat_categories": threat_categories,
                 "severity": severity,
+                "block_reason": self._get_block_reason(threat_categories, findings),
                 "impact": "negative" if findings else "neutral"
             }
         except Exception as e:
             self._last_error = str(e)
             logger.error(f"AdversarialRole.evaluate failed: {e}", exc_info=True)
             raise
+    
+    def _get_block_reason(self, threat_categories: list, findings: list) -> str:
+        """Get human-readable block reason for logging/display."""
+        if "illegal_content" in threat_categories:
+            return "Illegal content detected - permanent ban"
+        elif "crypto_miners" in threat_categories:
+            return "Crypto mining detected - resource abuse"
+        elif "dmca_violations" in threat_categories:
+            return "Copyright violation detected - DMCA"
+        elif "torrent_aggregators" in threat_categories:
+            return "Torrent activity detected - piracy"
+        elif "vnc_virtual_desktops" in threat_categories:
+            return "Unauthorized remote access detected"
+        elif "mirrors_userbots" in threat_categories:
+            return "Spam mirror/userbot detected"
+        elif findings:
+            return "Bot-like behavior detected"
+        else:
+            return "Unknown threat"
     
     def analyze(self, evidence: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """ESE-compatible analyze method."""
