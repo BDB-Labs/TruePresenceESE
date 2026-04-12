@@ -1,0 +1,27 @@
+# TruePresence System Configuration
+version: "1.0.0"
+
+thresholds:
+  allow: 0.65
+  step_up: 0.4
+  reject: 0.35
+
+signals:
+  liveness_weight: 0.4
+  mediation_weight: 0.3
+  relay_weight: 0.2
+  optimization_weight: 0.1
+
+challenge_settings:
+  uncertainty_min: 0.35
+  uncertainty_max: 0.75
+  default_ttl: 15.0
+  max_attempts: 3
+
+ensemble:
+  roles:
+    - liveness_analyst
+    - relay_analyst
+    - mediation_analyst
+    - adversarial_reviewer
+    - trust_synthesizer

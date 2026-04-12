@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TruePresence Demo</title>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { max-width: 900px; margin: 0 auto; padding: 20px; background: #0d1117; color: #c9d1d9; }
+    h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin: 16px 0; }
+    .status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
+    .connected { background: #3fb950; }
+    .disconnected { background: #f85149; }
+    .score-bar { height: 24px; background: #21262d; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+    .score-fill { height: 100%; transition: width 0.3s ease, background 0.3s ease; }
+    .allow { background: #3fb950; }
+    .step_up { background: #d29922; }
+    .reject { background: #f85149; }
+    .metric { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #21262d; }
+    .metric-value { color: #58a6ff; font-family: monospace; }
+    .log { background: #0d1117; border: 1px solid #30363d; border-radius: 4px; padding: 8px; height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+    .log-entry { padding: 2px 0; }
+    .log-entry:nth-child(even) { background: #161b22; }
+    .challenge-box { background: #1f1c0a; border: 1px solid #d29922; border-radius: 4px; padding: 16px; margin: 8px 0; display: none; }
+    .challenge-box.active { display: block; }
+    button { background: #238636; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    button:hover { background: #2ea043; }
+    button:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+    input, textarea { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 8px; border-radius: 4px; width: 100%; margin: 4px 0; }
+    .section-title { color: #8b949e; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>TruePresence Demo</h1>
+  
+  <div class="card">
+    <div><span class="status-indicator" id="statusDot"></span><span id="statusText">Disconnected</span></div>
+    <p>Session ID: <code id="sessionId">-</code></p>
+    <button id="connectBtn" onclick="connect()">Connect to Server</button>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Trust Score</div>
+    <div class="score-bar">
+      <div class="score-fill" id="scoreFill" style="width: 0%"></div>
+    </div>
+    <div>Decision: <strong id="decisionText">-</strong></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Signals</div>
+    <div class="metric"><span>Liveness</span><span class="metric-value" id="livenessVal">-</span></div>
+    <div class="metric"><span>AI Mediation</span><span class="metric-value" id="aiMediationVal">-</span></div>
+    <div class="metric"><span>Relay Risk</span><span class="metric-value" id="relayRiskVal">-</span></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Challenge Response</div>
+    <div class="challenge-box" id="challengeBox">
+      <strong style="color: #d29922;">Challenge:</strong>
+      <p id="challengePrompt">-</p>
+      <input type="text" id="challengeInput" placeholder="Type your response...">
+    </div>
+    <div id="noChallenge">No active challenge</div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Event Log</div>
+    <div class="log" id="eventLog"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Test Actions</div>
+    <p>Try these to see how the system responds:</p>
+    <button onclick="simulateTyping()">Simulate Normal Typing</button>
+    <button onclick="simulatePaste()">Simulate Paste (AI)</button>
+    <button onclick="simulateRelay()">Simulate Relay Delay</button>
+    <button onclick="clearEvents()">Clear Events</button>
+  </div>
+
+  <script type="module">
+    let ws = null;
+    let sessionId = null;
+
+    window.connect = function() {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      
+      const serverUrl = prompt('WebSocket server URL:', 'ws://localhost:8000');
+      if (!serverUrl) return;
+
+      sessionId = crypto.randomUUID();
+      document.getElementById('sessionId').textContent = sessionId.substring(0, 8) + '...';
+      
+      ws = new WebSocket(serverUrl);
+      
+      ws.onopen = () => {
+        document.getElementById('statusDot').className = 'status-indicator connected';
+        document.getElementById('statusText').textContent = 'Connected';
+        document.getElementById('connectBtn').textContent = 'Disconnect';
+        log('Connected to ' + serverUrl);
+      };
+      
+      ws.onclose = () => {
+        document.getElementById('statusDot').className = 'status-indicator disconnected';
+        document.getElementById('statusText').textContent = 'Disconnected';
+        document.getElementById('connectBtn').textContent = 'Connect to Server';
+      };
+      
+      ws.onerror = (e) => log('Error: ' + e);
+      
+      ws.onmessage = (msg) => {
+        const data = JSON.parse(msg.data);
+        log('← ' + JSON.stringify(data));
+        
+        if (data.type === 'trust_update') {
+          updateDisplay(data.data);
+        } else if (data.type === 'challenge') {
+          showChallenge(data.challenge);
+        }
+      };
+    };
+
+    function send(event) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('Not connected. Click "Connect to Server" first.');
+        return;
+      }
+      ws.send(JSON.stringify({
+        session_id: sessionId,
+        timestamp: Date.now(),
+        ...event
+      }));
+      log('→ ' + JSON.stringify(event));
+    }
+
+    function updateDisplay(data) {
+      const score = data.live_score || 0;
+      const decision = data.decision || '-';
+      const signals = data.signals || {};
+      
+      document.getElementById('scoreFill').style.width = (score * 100) + '%';
+      document.getElementById('scoreFill').className = 'score-fill ' + decision;
+      document.getElementById('decisionText').textContent = decision.toUpperCase();
+      
+      document.getElementById('livenessVal').textContent = (signals.liveness || 0).toFixed(2);
+      document.getElementById('aiMediationVal').textContent = (signals.ai_mediation || 0).toFixed(2);
+      document.getElementById('relayRiskVal').textContent = (signals.relay_risk || 0).toFixed(2);
+    }
+
+    function showChallenge(challenge) {
+      document.getElementById('challengeBox').className = 'challenge-box active';
+      document.getElementById('challengePrompt').textContent = challenge.payload?.prompt || challenge.prompt || JSON.stringify(challenge);
+      document.getElementById('noChallenge').style.display = 'none';
+      log('⚠ CHALLENGE: ' + challenge.id);
+    }
+
+    function log(msg) {
+      const el = document.getElementById('eventLog');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = new Date().toISOString().split('T')[1].slice(0,8) + ' ' + msg;
+      el.insertBefore(entry, el.firstChild);
+    }
+
+    // Test functions
+    window.simulateTyping = function() {
+      for (let i = 0; i < 10; i++) {
+        setTimeout(() => {
+          send({ event_type: 'key_timing', payload: { interval_ms: 80 + Math.random() * 60 } });
+        }, i * 100);
+      }
+    };
+
+    window.simulatePaste = function() {
+      for (let i = 0; i < 5; i++) {
+        send({ event_type: 'clipboard', payload: { pasted: true } });
+      }
+    };
+
+    window.simulateRelay = function() {
+      // Low activity appears as relay suspicious
+      send({ event_type: 'key_timing', payload: { interval_ms: 50 } });
+      setTimeout(() => send({ event_type: 'key_timing', payload: { interval_ms: 55 } }), 2000);
+    };
+
+    window.clearEvents = function() {
+      // Just reset - new session effectively clears history
+      location.reload();
+    };
+  </script>
+</body>
+</html>
