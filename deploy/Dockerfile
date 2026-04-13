@@ -17,4 +17,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=5 \
     CMD python -c "import httpx; r = httpx.get('http://localhost:${PORT:-8000}/health'); exit(0 if r.status_code == 200 else 1)" || exit 1
 
 # Run server - use $PORT injected by Railway, fallback to 8000
-CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT

@@ -13,7 +13,7 @@ import logging
 import uuid
 import datetime
 from typing import Dict, Any, Optional, List
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import APIRouter, FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import asyncio
 import httpx
@@ -25,7 +25,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="TruePresence Telegram Protection", version="1.0.0")
+# Use router instead of separate app
+router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 # Import TruePresence components
 from truepresence.core.orchestrator import TruePresenceOrchestrator
@@ -452,7 +453,7 @@ service = TelegramProtectionService()
 
 
 # Exception handlers - CRITICAL: No silent failures
-@app.exception_handler(TruePresenceError)
+@router.exception_handler(TruePresenceError)
 async def tp_exception_handler(request: Request, exc: TruePresenceError):
     logger.error(f"TruePresence error: {exc.message}")
     return JSONResponse(
@@ -461,7 +462,7 @@ async def tp_exception_handler(request: Request, exc: TruePresenceError):
     )
 
 
-@app.exception_handler(Exception)
+@router.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     logger.critical(f"UNHANDLED: {exc}", exc_info=True)
     return JSONResponse(
@@ -471,7 +472,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 # Telegram Webhook Endpoint
-@app.post("/webhook")
+@router.post("/webhook")
 async def telegram_webhook(request: Request):
     """
     Receive Telegram webhook updates.
@@ -514,7 +515,7 @@ async def telegram_webhook(request: Request):
 
 
 # Admin endpoints
-@app.get("/status")
+@router.get("/status")
 async def get_status(request: Request):
     """Get protection service status for a tenant."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
@@ -529,14 +530,14 @@ async def get_status(request: Request):
         return tenant_service.get_status(tenant_id)
 
 
-@app.post("/groups/{group_id}/protect")
+@router.post("/groups/{group_id}/protect")
 async def protect_group(group_id: int, admin_chat_id: int = None):
     """Register a group for protection."""
     service.register_group(group_id, admin_chat_id)
     return {"ok": True, "group_id": group_id, "status": "protected"}
 
 
-@app.get("/groups/{group_id}/members")
+@router.get("/groups/{group_id}/members")
 async def get_group_members(group_id: int):
     """Get member analysis for a group (for audit)."""
     # This would integrate with Telegram API to get all members
@@ -546,7 +547,7 @@ async def get_group_members(group_id: int):
     }
 
 
-@app.get("/reviews")
+@router.get("/reviews")
 async def get_all_reviews(request: Request):
     """Get all pending manual reviews for a tenant."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
@@ -560,7 +561,7 @@ async def get_all_reviews(request: Request):
     }
 
 
-@app.get("/reviews/{review_id}")
+@router.get("/reviews/{review_id}")
 async def get_review_details(review_id: str, request: Request):
     """Get details of a specific manual review."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
@@ -575,7 +576,7 @@ async def get_review_details(review_id: str, request: Request):
     return review
 
 
-@app.post("/reviews/{review_id}/resolve")
+@router.post("/reviews/{review_id}/resolve")
 async def resolve_review(review_id: str, resolution: Dict[str, Any], request: Request):
     """Resolve a manual review with admin decision."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
@@ -601,7 +602,7 @@ async def resolve_review(review_id: str, resolution: Dict[str, Any], request: Re
     }
 
 
-@app.post("/reviews/{review_id}/execute")
+@router.post("/reviews/{review_id}/execute")
 async def execute_review_decision(review_id: str, request: Request):
     """Execute the admin decision for a review."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
@@ -631,7 +632,7 @@ async def execute_review_decision(review_id: str, request: Request):
     }
 
 
-@app.get("/config")
+@router.get("/config")
 async def get_tenant_config(request: Request):
     """Get current tenant configuration."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
@@ -645,7 +646,7 @@ async def get_tenant_config(request: Request):
     }
 
 
-@app.post("/config/detectors")
+@router.post("/config/detectors")
 async def configure_detectors(request: Request, config: Dict[str, Any]):
     """Configure detectors for a tenant (admin only)."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
@@ -668,7 +669,7 @@ async def configure_detectors(request: Request, config: Dict[str, Any]):
     }
 
 
-@app.get("/config/options")
+@router.get("/config/options")
 async def get_configuration_options():
     """Get available configuration options."""
     return {
@@ -710,7 +711,7 @@ async def get_configuration_options():
     }
 
 
-@app.post("/groups/{group_id}/audit")
+@router.post("/groups/{group_id}/audit")
 async def run_audit(group_id: int):
     """
     Run a full audit of group members.
@@ -726,7 +727,7 @@ async def run_audit(group_id: int):
 
 
 # Health check
-@app.get("/health")
+@router.get("/health")
 async def health_check():
     """Health check endpoint."""
     return {
