@@ -16,12 +16,16 @@
         "dockerfile": "deploy/Dockerfile"
       },
       "healthcheck": {
-        "command": "python -c \"import httpx; r = httpx.get('http://localhost:8000/health'); exit(0 if r.status_code == 200 else 1)\"",
+        "command": "curl -f http://localhost:${PORT:-8000}/health || exit 1",
         "interval": 30,
         "timeout": 10,
-        "retries": 3
+        "retries": 3,
+        "startPeriod": 60
       },
-      "port": 8000,
+      "port": {
+        "port": 8000,
+        "proxy": false
+      },
       "variables": [
         {
           "key": "TELEGRAM_BOT_TOKEN",
