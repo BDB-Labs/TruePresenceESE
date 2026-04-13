@@ -48,6 +48,10 @@ def evaluate(session_id: str, event: dict) -> dict:
         "signals": {"liveness": liveness, "ai_mediation": ai_med, "relay_risk": relay}
     }
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 @app.get("/")
 def root():
     return {"TruePresence": "online", "endpoint": "ws://host:8000/ws/{session_id}"}

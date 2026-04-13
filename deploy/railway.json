@@ -16,7 +16,7 @@
         "dockerfile": "deploy/Dockerfile"
       },
       "healthcheck": {
-        "command": "python -c \"import requests; r = requests.get('http://localhost:8000/health'); exit(0 if r.status_code == 200 else 1)\"",
+        "command": "python -c \"import httpx; r = httpx.get('http://localhost:8000/health'); exit(0 if r.status_code == 200 else 1)\"",
         "interval": 30,
         "timeout": 10,
         "retries": 3
