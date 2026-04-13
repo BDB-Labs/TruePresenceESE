@@ -453,23 +453,7 @@ service = TelegramProtectionService()
 
 
 # Exception handlers - CRITICAL: No silent failures
-@router.exception_handler(TruePresenceError)
-async def tp_exception_handler(request: Request, exc: TruePresenceError):
-    logger.error(f"TruePresence error: {exc.message}")
-    return JSONResponse(
-        status_code=500,
-        content={"error": exc.__class__.__name__, "message": exc.message, "details": exc.details}
-    )
-
-
-@router.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    logger.critical(f"UNHANDLED: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"error": "InternalError", "message": str(exc)}
-    )
-
+# Note: Exception handlers must be added to main app, not router
 
 # Telegram Webhook Endpoint
 @router.post("/webhook")
