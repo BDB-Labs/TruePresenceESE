@@ -5,8 +5,13 @@ services:
       - "8000:8000"
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_BOT_TOKEN_CLIENT1=${TELEGRAM_BOT_TOKEN_CLIENT1}
+      - TELEGRAM_BOT_TOKEN_CLIENT2=${TELEGRAM_BOT_TOKEN_CLIENT2}
+      - BASE_URL=${BASE_URL:-https://your-domain.com}
       - PORT=8000
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - TENANT_NAME_CLIENT1=${TENANT_NAME_CLIENT1:-Client 1}
+      - TENANT_NAME_CLIENT2=${TENANT_NAME_CLIENT2:-Client 2}
     depends_on:
       - redis
     restart: unless-stopped

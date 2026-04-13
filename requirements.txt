@@ -1,0 +1,13 @@
+fastapi==0.95.0
+uvicorn[standard]==0.22.0
+httpx==0.24.0
+python-telegram-bot==20.3
+telethon==1.28.5
+redis==4.5.1
+tenacity==8.2.2
+toml==0.10.2
+python-dotenv==1.0.0
+pydantic==1.10.7
+aiohttp==3.8.4
+asyncio
+orjson==3.8.12

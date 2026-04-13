@@ -15,65 +15,145 @@ logger = logging.getLogger(__name__)
 class TelegramAdapter:
     """
     Adapts Telegram events to TruePresence events.
-    
+
     Maps Telegram's update types to TruePresence's evaluation format.
-    Detects specific threat categories.
+    Detects specific threat categories with configurable rules per tenant.
     """
-    
-    # Known patterns for threat detection
-    TORRENT_PATTERNS = [
-        r'magnet:\?xt=urn:btih:',
-        r'\.torrent$',
-        r'torrentz2',
-        r'kickasstorrents',
-        r'rarbg',
-        r'yts\.movies',
-        r'1337x',
-        r'thepiratebay',
-        r'tpb\.',
-    ]
-    
-    CRYPTO_MINING_PATTERNS = [
-        r'monero',
-        r'xmrig',
-        r'cryptonight',
-        r'nicehash',
-        r'pool\.mine',
-        r'stratum\+tcp',
-    ]
-    
-    VNC_PATTERNS = [
-        r'vnc://',
-        r'rdp://',
-        r'remote\.desktop',
-        r'anydesk',
-        r'teamviewer',
-    ]
-    
-    COPYRIGHT_PATTERNS = [
-        r'download.*full.*movie',
-        r'free.*download',
-        r'full.*album',
-        r'leaked.*album',
-        r'pirated',
-    ]
-    
-    ILLEGAL_PATTERNS = [
-        r'buy.*drugs',
-        r'fake.*id',
-        r'carding',
-        r'hacking.*service',
-        r'weapon.*sale',
-    ]
-    
-    def __init__(self):
+
+    # Detection categories with tiered configuration
+    # TIER 1: Core security (always enabled, non-configurable)
+    CORE_DETECTORS = {
+        'child_exploitation': {
+            'enabled': True,  # Always enabled
+            'configurable': False,
+            'patterns': [
+                r'\bchild.*porn\b',
+                r'\bkiddie.*porn\b',
+                r'\bcp\b(?!\s*(?:certificate|panel|apache|copyright))',
+                r'\blolita\b(?!\s*(?:book|novel|nabokov))',
+                r'\bpedo\b(?!\s*(?:bear|file|meter))',
+            ]
+        },
+        'illegal_content': {
+            'enabled': True,  # Always enabled
+            'configurable': False,
+            'patterns': [
+                r'buy.*drugs',
+                r'fake.*id', 
+                r'carding',
+                r'hacking.*service',
+                r'weapon.*sale',
+            ]
+        }
+    }
+
+    # TIER 2: Business policy (configurable per tenant)
+    POLICY_DETECTORS = {
+        'copyright_violation': {
+            'enabled': True,  # Default enabled
+            'configurable': True,
+            'patterns': [
+                r'download.*full.*movie',
+                r'free.*download',
+                r'full.*album',
+                r'leaked.*album',
+                r'pirated',
+            ]
+        },
+        'torrent_sharing': {
+            'enabled': True,  # Default enabled
+            'configurable': True,
+            'patterns': [
+                r'magnet:\?xt=urn:btih:',
+                r'\.torrent$',
+                r'torrentz2',
+                r'kickasstorrents',
+                r'rarbg',
+            ]
+        },
+        'crypto_mining': {
+            'enabled': True,  # Default enabled
+            'configurable': True,
+            'patterns': [
+                r'monero',
+                r'xmrig',
+                r'cryptonight',
+                r'nicehash',
+                r'pool\.mine',
+            ]
+        },
+        'remote_access': {
+            'enabled': True,  # Default enabled
+            'configurable': True,
+            'patterns': [
+                r'vnc://',
+                r'rdp://',
+                r'remote\.desktop',
+                r'anydesk',
+                r'teamviewer',
+            ]
+        }
+    }
+
+    # TIER 3: Custom detectors (available for enterprise clients)
+    CUSTOM_DETECTORS = {}
+
+    def __init__(self, tenant_config: Dict[str, Any] = None):
         self.user_sessions = {}  # user_id -> session data
-        # Compile patterns for efficiency
-        self._torrent_re = re.compile('|'.join(self.TORRENT_PATTERNS), re.I)
-        self._crypto_re = re.compile('|'.join(self.CRYPTO_MINING_PATTERNS), re.I)
-        self._vnc_re = re.compile('|'.join(self.VNC_PATTERNS), re.I)
-        self._copyright_re = re.compile('|'.join(self.COPYRIGHT_PATTERNS), re.I)
-        self._illegal_re = re.compile('|'.join(self.ILLEGAL_PATTERNS), re.I)
+        self.tenant_config = tenant_config or {}
+        
+        # Apply tenant-specific configuration
+        self._configure_detectors()
+        
+        # Compile all enabled patterns
+        self._compile_patterns()
+
+    def _configure_detectors(self):
+        """Apply tenant-specific detector configuration."""
+        # Start with defaults
+        self.active_detectors = {}
+        
+        # Always enable core detectors (non-configurable)
+        for name, config in self.CORE_DETECTORS.items():
+            self.active_detectors[name] = {
+                'enabled': True,
+                'patterns': config['patterns'],
+                'tier': 'core'
+            }
+        
+        # Apply policy detectors with tenant overrides
+        for name, config in self.POLICY_DETECTORS.items():
+            tenant_override = self.tenant_config.get('detectors', {}).get(name, {})
+            
+            enabled = tenant_override.get('enabled', config['enabled'])
+            custom_patterns = tenant_override.get('patterns', [])
+            
+            patterns = config['patterns'] + custom_patterns
+            
+            self.active_detectors[name] = {
+                'enabled': enabled,
+                'patterns': patterns,
+                'tier': 'policy'
+            }
+        
+        # Add custom detectors if configured
+        for name, config in self.tenant_config.get('custom_detectors', {}).items():
+            self.active_detectors[name] = {
+                'enabled': config.get('enabled', True),
+                'patterns': config.get('patterns', []),
+                'tier': 'custom'
+            }
+
+    def _compile_patterns(self):
+        """Compile regex patterns for all enabled detectors."""
+        self.compiled_patterns = {}
+        
+        for name, config in self.active_detectors.items():
+            if config['enabled'] and config['patterns']:
+                self.compiled_patterns[name] = re.compile(
+                    '|'.join(config['patterns']), 
+                    re.I
+                )
         
     def parse_update(self, update: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -145,46 +225,51 @@ class TelegramAdapter:
         }
     
     def _analyze_content(self, text: str) -> Dict[str, Any]:
-        """Analyze message content for specific threat categories."""
+        """Analyze message content for specific threat categories with tenant configuration."""
         text_lower = text.lower()
         
-        # Check each category
-        torrent_matches = self._torrent_re.findall(text_lower)
-        crypto_matches = self._crypto_re.findall(text_lower)
-        vnc_matches = self._vnc_re.findall(text_lower)
-        copyright_matches = self._copyright_re.findall(text_lower)
-        illegal_matches = self._illegal_re.findall(text_lower)
+        # Initialize results
+        results = {
+            "threats_detected": [],
+            "scores": {},
+            "matches": {}
+        }
         
-        # Calculate scores (0-1)
-        torrent_score = min(1.0, len(torrent_matches) * 0.5)
-        crypto_score = min(1.0, len(crypto_matches) * 0.5)
-        vnc_score = min(1.0, len(vnc_matches) * 0.5)
-        copyright_score = min(1.0, len(copyright_matches) * 0.5)
-        
-        # Illegal keywords
-        illegal_keywords = illegal_matches
+        # Analyze each enabled detector
+        for detector_name, config in self.active_detectors.items():
+            if not config['enabled']:
+                continue
+            
+            pattern = self.compiled_patterns.get(detector_name)
+            if not pattern:
+                continue
+            
+            matches = pattern.findall(text_lower)
+            score = min(1.0, len(matches) * 0.5)
+            
+            results["scores"][detector_name] = score
+            results["matches"][detector_name] = matches
+            
+            # Determine if threat is detected based on tier-specific thresholds
+            if score > 0:
+                if config['tier'] == 'core':
+                    # Core threats: lower threshold, immediate detection
+                    if score > 0.1:
+                        results["threats_detected"].append(detector_name)
+                else:
+                    # Policy/custom threats: standard threshold
+                    if score > 0.5:
+                        results["threats_detected"].append(detector_name)
         
         # Mirror detection (simplified - would need cross-group analysis)
         mirrored_score = 0.0
         if len(text) > 100 and any(word in text_lower for word in ["join", "channel", "subscribe", "follow"]):
             mirrored_score = 0.7
+            if mirrored_score > 0.6:
+                results["threats_detected"].append("mirrors_userbots")
+            results["scores"]["mirrored_content"] = mirrored_score
         
-        return {
-            "torrent_score": torrent_score,
-            "crypto_score": crypto_score,
-            "vnc_score": vnc_score,
-            "copyright_score": copyright_score,
-            "illegal_keywords": illegal_keywords,
-            "mirrored_score": mirrored_score,
-            "threats_detected": [
-                "torrents" if torrent_score > 0.5 else None,
-                "crypto_miners" if crypto_score > 0.5 else None,
-                "vnc_virtual_desktops" if vnc_score > 0.3 else None,
-                "dmca_violations" if copyright_score > 0.5 else None,
-                "illegal_content" if illegal_keywords else None,
-                "mirrors_userbots" if mirrored_score > 0.6 else None,
-            ]
-        }
+        return results
     
     def _parse_chat_member(self, chat_member: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a chat member update (join/leave) with threat detection."""
@@ -254,13 +339,14 @@ class TelegramAdapter:
         # Would query database in production
         return 0
     
-    def build_response(self, evaluation_result: Dict[str, Any]) -> Dict[str, Any]:
+    def build_response(self, evaluation_result: Dict[str, Any], tenant_id: str = None) -> Dict[str, Any]:
         """
         Convert TruePresence result to Telegram action.
-        
+
         Args:
             evaluation_result: Result from orchestrator.evaluate()
-            
+            tenant_id: Optional tenant identifier for context
+
         Returns:
             Action dictionary for Telegram bot to execute
         """
@@ -280,37 +366,43 @@ class TelegramAdapter:
                     "action": "ban",
                     "reason": block_reason or f"Threat detected: {', '.join(threat_categories)}",
                     "confidence": confidence,
-                    "threat_categories": threat_categories
+                    "threat_categories": threat_categories,
+                    "tenant_id": tenant_id
                 }
         
         if decision == "block" and confidence > 0.8:
             return {
                 "action": "ban",
                 "reason": block_reason or f"Bot detected ({human_prob:.0%} human probability)",
-                "confidence": confidence
+                "confidence": confidence,
+                "tenant_id": tenant_id
             }
         elif decision == "block" and confidence > 0.6:
             return {
                 "action": "kick",
                 "reason": block_reason or f"Suspicious ({human_prob:.0%} human probability)",
-                "confidence": confidence
+                "confidence": confidence,
+                "tenant_id": tenant_id
             }
         elif decision == "challenge":
             return {
                 "action": "challenge",
                 "reason": "Verification required",
-                "confidence": confidence
+                "confidence": confidence,
+                "tenant_id": tenant_id
             }
         elif decision == "review":
             return {
                 "action": "alert_admin",
                 "reason": f"Review needed - {evaluation_result.get('risk_factors', [])}",
-                "confidence": confidence
+                "confidence": confidence,
+                "tenant_id": tenant_id
             }
         
         return {
             "action": "allow",
-            "confidence": confidence
+            "confidence": confidence,
+            "tenant_id": tenant_id
         }
     
     def _parse_chat_member(self, chat_member: Dict[str, Any]) -> Dict[str, Any]:
