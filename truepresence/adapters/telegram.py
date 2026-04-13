@@ -6,6 +6,9 @@ Includes detection for: Mirrors/Userbots, Crypto Miners, DMCA, Torrents, VNC, Il
 """
 
 import re
+import math
+import time
+from collections import defaultdict, deque
 from typing import Dict, Any, Optional, List
 import logging
 
@@ -99,12 +102,19 @@ class TelegramAdapter:
     CUSTOM_DETECTORS = {}
 
     def __init__(self, tenant_config: Dict[str, Any] = None):
-        self.user_sessions = {}  # user_id -> session data
         self.tenant_config = tenant_config or {}
-        
+
+        # Per-user message timestamps for velocity calculation (last 60 seconds)
+        # user_id -> deque of unix timestamps
+        self._user_message_times: Dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
+
+        # Per-user recent message texts for similarity calculation
+        # user_id -> deque of recent message texts
+        self._user_recent_texts: Dict[str, deque] = defaultdict(lambda: deque(maxlen=10))
+
         # Apply tenant-specific configuration
         self._configure_detectors()
-        
+
         # Compile all enabled patterns
         self._compile_patterns()
 
@@ -187,13 +197,27 @@ class TelegramAdapter:
         from_user = message.get("from", {})
         chat = message.get("chat", {})
         text = message.get("text", "") or ""
-        
+        user_id = str(from_user.get("id", "unknown"))
+        msg_timestamp = message.get("date", time.time())
+
         # Analyze content for threats
         threat_analysis = self._analyze_content(text)
-        
+
+        # Calculate message velocity (messages per minute in last 60s)
+        self._user_message_times[user_id].append(msg_timestamp)
+        recent = [t for t in self._user_message_times[user_id] if msg_timestamp - t <= 60]
+        message_velocity = len(recent)  # messages in last 60 seconds
+
+        # Calculate content similarity (avg Jaccard against last 10 messages)
+        content_similarity = self._calc_content_similarity(user_id, text)
+        self._user_recent_texts[user_id].append(text)
+
+        # Extract scores safely from threat_analysis
+        scores = threat_analysis.get("scores", {})
+
         return {
             "event_type": "message",
-            "timestamp": message.get("date", 0),
+            "timestamp": msg_timestamp,
             "payload": {
                 "message_id": message.get("message_id"),
                 "text": text,
@@ -203,16 +227,27 @@ class TelegramAdapter:
             },
             "features": {
                 "text_length": len(text),
-                # Threat indicators
-                "torrent_indicators": threat_analysis["torrent_score"],
-                "crypto_mining_indicators": threat_analysis["crypto_score"],
-                "vnc_indicators": threat_analysis["vnc_score"],
-                "copyright_indicators": threat_analysis["copyright_score"],
-                "illegal_indicators": threat_analysis["illegal_keywords"],
-                "mirrored_content_score": threat_analysis["mirrored_score"],
-                # Behavioral signals
-                "message_velocity": 0,  # Calculated in bot
-                "content_similarity": 0,  # Calculated over time
+                # Threat indicator scores (correctly mapped from threat_analysis)
+                "torrent_indicators": scores.get("torrent_sharing", 0.0),
+                "crypto_mining_indicators": scores.get("crypto_mining", 0.0),
+                "vnc_indicators": scores.get("remote_access", 0.0),
+                "copyright_indicators": scores.get("copyright_violation", 0.0),
+                "illegal_indicators": scores.get("illegal_content", 0.0),
+                "mirrored_content_score": scores.get("mirrored_content", 0.0),
+                # Behavioral signals — now actually calculated
+                "message_velocity": message_velocity,
+                "content_similarity": content_similarity,
+            },
+            "signals": {
+                # Signals for the role pipeline
+                "message_velocity": message_velocity,
+                "content_similarity": content_similarity,
+                "torrent_indicators": scores.get("torrent_sharing", 0.0),
+                "crypto_mining_indicators": scores.get("crypto_mining", 0.0),
+                "vnc_indicators": scores.get("remote_access", 0.0),
+                "copyright_indicators": scores.get("copyright_violation", 0.0),
+                "illegal_indicators": scores.get("illegal_content", 0.0),
+                "mirrored_content_score": scores.get("mirrored_content", 0.0),
             },
             "context": {
                 "platform": "telegram",
@@ -318,14 +353,59 @@ class TelegramAdapter:
         }
     
     def _estimate_account_age(self, user: Dict[str, Any]) -> int:
-        """Estimate account age in days. Telegram API doesn't provide this directly."""
-        # This would need to be enhanced with actual API calls
-        # For now, return a default
-        return 30  # Assume 30 days if unknown
-    
+        """
+        Estimate account age in days from Telegram user ID.
+
+        Telegram user IDs are roughly sequential and monotonically increasing.
+        We can estimate registration era from known ID ranges:
+          < 100_000        : 2013 era (~4000+ days ago)
+          < 10_000_000     : 2014-2016 (~2500-3500 days)
+          < 100_000_000    : 2016-2018 (~1500-2500 days)
+          < 1_000_000_000  : 2018-2021 (~500-1500 days)
+          >= 1_000_000_000 : 2021+     (~0-500 days, treat as new)
+        Returns a rough midpoint estimate. Not exact but far better than always 30.
+        """
+        user_id = user.get("id", 0) if isinstance(user, dict) else 0
+        if not user_id:
+            return 30
+        if user_id < 100_000:
+            return 4000
+        elif user_id < 10_000_000:
+            return 3000
+        elif user_id < 100_000_000:
+            return 2000
+        elif user_id < 1_000_000_000:
+            return 900
+        else:
+            return 120  # Likely recent account — treat as higher risk
+
+    def _calc_content_similarity(self, user_id: str, text: str) -> float:
+        """
+        Calculate Jaccard similarity between current message and user's recent messages.
+
+        Returns a float 0-1 where 1.0 means the message is identical to all recent ones
+        (strong spam/mirror signal) and 0.0 means completely unique content.
+        """
+        if not text or user_id not in self._user_recent_texts:
+            return 0.0
+        recent = list(self._user_recent_texts[user_id])
+        if not recent:
+            return 0.0
+        current_words = set(text.lower().split())
+        if not current_words:
+            return 0.0
+        similarities = []
+        for prev in recent:
+            prev_words = set(prev.lower().split())
+            if not prev_words:
+                continue
+            intersection = len(current_words & prev_words)
+            union = len(current_words | prev_words)
+            similarities.append(intersection / union if union else 0.0)
+        return round(sum(similarities) / len(similarities), 3) if similarities else 0.0
+
     def _calc_entropy(self, text: str) -> float:
         """Calculate username entropy for bot detection."""
-        import math
         if not text:
             return 0.0
         freq = {}
