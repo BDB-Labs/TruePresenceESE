@@ -7,12 +7,17 @@ distributed deployment support.
 """
 
 from typing import Dict, Any, Optional
+import os
+import logging
 from truepresence.core.synthesis.synth import EnsembleSynthesis
 from truepresence.core.memory.session_memory import SessionMemory
 from truepresence.adaptive.weighting import AdaptiveWeights
 from truepresence.agents.council import AgentCouncil
 from truepresence.memory.identity_graph import IdentityGraph
 from truepresence.runtime.distributed import DistributedRuntime
+from truepresence.exceptions import OrchestratorError, wrap_role_error
+
+logger = logging.getLogger(__name__)
 
 
 class TruePresenceOrchestratorV3:
@@ -28,27 +33,29 @@ class TruePresenceOrchestratorV3:
     def __init__(self, redis_url: str = None):
         """
         Initialize the V3 orchestrator.
-        
+
         Args:
-            redis_url: Optional Redis URL for distributed runtime
+            redis_url: Optional Redis URL — defaults to REDIS_URL env var
         """
         # Core components
         self.memory = SessionMemory()
         self.adaptive = AdaptiveWeights()
         self.synthesis = EnsembleSynthesis()
-        
+
         # Enhanced components
         self.council = AgentCouncil()
         self.identity_graph = IdentityGraph(similarity_threshold=0.75)
-        
-        # Distributed runtime (optional)
+
+        # Distributed runtime — wire from env var if not explicitly passed
+        redis_url = redis_url or os.environ.get("REDIS_URL")
         self.distributed = None
         if redis_url:
             try:
                 self.distributed = DistributedRuntime(redis_url=redis_url)
+                logger.info(f"DistributedRuntime connected to Redis")
             except Exception as e:
-                print(f"Warning: Could not initialize distributed runtime: {e}")
-        
+                logger.warning(f"Could not initialize distributed runtime: {e}")
+
         # Initialize roles
         self.roles = {}
         self._initialize_roles()
@@ -75,7 +82,11 @@ class TruePresenceOrchestratorV3:
                     self.synthesis.add_role(role_name)
                     self.council.add_agent(role_name, self.roles[role_name])
             except Exception as e:
-                print(f"Warning: Could not initialize role {role_name}: {e}")
+                logger.error(f"FAILED to initialize role {role_name}: {e}", exc_info=True)
+                raise OrchestratorError(
+                    message=f"Failed to initialize role {role_name}",
+                    details={"role": role_name, "error": str(e)}
+                )
     
     def build_evidence(self, session: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
         """Build evidence from session and event data."""
@@ -131,7 +142,8 @@ class TruePresenceOrchestratorV3:
                 try:
                     role_outputs[role_name] = role.evaluate(evidence, session)
                 except Exception as e:
-                    role_outputs[role_name] = {"error": str(e), "human_probability": 0.5}
+                    logger.error(f"Role {role_name} FAILED during evaluate: {e}", exc_info=True)
+                    raise wrap_role_error(role_name, "evaluate", e)
         
         # Run agent council for structured debate
         council_result = self.council.evaluate(evidence, session)

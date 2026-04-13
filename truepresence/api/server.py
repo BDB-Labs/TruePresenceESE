@@ -2,13 +2,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
-import sys
-import os
 import logging
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.session import Session
+from truepresence.core.session import Session
 from truepresence.exceptions import TruePresenceError, OrchestratorError, RoleError
 
 # Configure logging - CRITICAL systems must log
@@ -118,7 +115,7 @@ def create_session(assurance_level: str = "A1"):
     session_id = str(uuid.uuid4())
     session = Session(
         session_id=session_id,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         assurance_level=assurance_level,
     )
     SESSIONS[session_id] = session
@@ -152,7 +149,7 @@ def evaluate(request: EvaluateRequest):
         # Create new session if doesn't exist
         session = Session(
             session_id=request.session_id,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             assurance_level="A1"
         )
         SESSIONS[request.session_id] = session
@@ -207,22 +204,18 @@ def evaluate(request: EvaluateRequest):
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint - aggregates across all session orchestrators."""
-    # Aggregate health from all orchestrators
-    total_sessions = len(_orchestrators)
-    orchestrator_health = {}
-    
+    """Health check endpoint — returns status only, no internal state exposed."""
+    unhealthy = []
     for sid, orch in _orchestrators.items():
         try:
-            orchestrator_health[sid] = orch.health_check()
-        except:
-            orchestrator_health[sid] = {"error": "unavailable"}
-    
-    return {
-        "status": "healthy",
-        "total_sessions": total_sessions,
-        "orchestrators": orchestrator_health
-    }
+            orch.health_check()
+        except Exception as e:
+            logger.error(f"Orchestrator {sid} failed health check: {e}", exc_info=True)
+            unhealthy.append(sid)
+
+    if unhealthy:
+        return JSONResponse(status_code=503, content={"status": "degraded", "unhealthy_sessions": len(unhealthy)})
+    return {"status": "ok", "active_sessions": len(_orchestrators)}
 
 
 @app.get("/v1/sessions/{session_id}/cluster")

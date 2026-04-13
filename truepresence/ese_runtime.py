@@ -1,4 +1,5 @@
 import yaml
+from pathlib import Path
 from typing import Dict, Any, List
 from core.events import Event
 from truepresence.adapter.evidence_adapter import EvidenceAdapter
@@ -6,13 +7,17 @@ from truepresence.core.roles.base import (
     LivenessRole, RelayRole, MediationRole, AdversarialRole, SynthesizerRole
 )
 
+# Default config path anchored to the repo root, not the process cwd
+_DEFAULT_CONFIG = Path(__file__).parent.parent / "config.yaml"
+
 class ESEEnsembleRuntime:
     """
     The True ESE Integration: Orchestrates the role-based pipeline.
     
     Uses unified Role interface for consistent method signatures.
     """
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = None):
+        config_path = Path(config_path) if config_path else _DEFAULT_CONFIG
         with open(config_path, "r") as f:
             self.config = yaml.safe_load(f)
         

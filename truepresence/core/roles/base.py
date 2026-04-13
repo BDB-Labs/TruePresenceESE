@@ -465,31 +465,6 @@ class SynthesizerRole(Role):
         except Exception as e:
             logger.error(f"SynthesizerRole.analyze failed: {e}", exc_info=True)
             raise
-            
-            human_probability = (liveness * 0.4) + ((1 - ai_mediation) * 0.3) + ((1 - relay_risk) * 0.3)
-        else:
-            # Average all role human probabilities
-            probs = [v.get("human_probability", 0.5) for v in role_outputs.values()]
-            human_probability = sum(probs) / len(probs) if probs else 0.5
-        
-        confidence = 0.7  # Default confidence for synthesis
-        self._last_confidence = confidence
-        
-        return {
-            "role": "synthesizer",
-            "human_probability": human_probability,
-            "confidence": confidence,
-            "decision": "allow" if human_probability > 0.65 else ("challenge" if human_probability > 0.35 else "block")
-        }
-    
-    def analyze(self, evidence: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """ESE-compatible analyze method."""
-        result = self.evaluate(evidence, context)
-        return {
-            "trust_score": result["human_probability"],
-            "decision": result["decision"],
-            "confidence": result["confidence"]
-        }
 
 
 # Aliases for backward compatibility with existing code

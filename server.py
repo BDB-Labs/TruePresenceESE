@@ -66,7 +66,11 @@ async def ws(websocket: WebSocket, session_id: str):
     try:
         while True:
             data = await websocket.receive_text()
-            event = json.loads(data)
+            try:
+                event = json.loads(data)
+            except json.JSONDecodeError as e:
+                await websocket.send_json({"type": "error", "message": f"Invalid JSON: {e}"})
+                continue
             
             if event.get("event_type") == "challenge_response":
                 if session_id in active_challenges:

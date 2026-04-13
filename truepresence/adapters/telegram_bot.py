@@ -11,7 +11,7 @@ import os
 import json
 import logging
 import uuid
-import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -64,7 +64,7 @@ class TelegramProtectionService:
         
         # Tenant metadata
         self.tenant_name = os.environ.get(f"TENANT_NAME_{tenant_id.upper()}", tenant_id)
-        self.tenant_created = datetime.datetime.utcnow().isoformat()
+        self.tenant_created = datetime.now(timezone.utc).isoformat()
 
     def _load_tenant_config(self, tenant_id: str) -> Dict[str, Any]:
         """Load tenant-specific configuration from environment variables."""
@@ -100,7 +100,7 @@ class TelegramProtectionService:
                     # Parse patterns from JSON
                     try:
                         config["custom_detectors"][detector_name]["patterns"] = json.loads(value)
-                    except:
+                    except (json.JSONDecodeError, ValueError):
                         config["custom_detectors"][detector_name]["patterns"] = [value]
                 else:
                     config["custom_detectors"][detector_name][prop] = value
@@ -111,13 +111,11 @@ class TelegramProtectionService:
             if var in os.environ:
                 try:
                     config["response_thresholds"][threshold] = float(os.environ[var])
-                except:
-                    pass
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid threshold value for {var}: {os.environ[var]}")
         
         logger.info(f"Loaded configuration for tenant {tenant_id}: {config}")
         return config
-        
-        logger.info("TelegramProtectionService initialized")
     
     async def process_update(self, update: Dict[str, Any], tenant_id: str = None) -> Optional[Dict[str, Any]]:
         """
@@ -158,6 +156,13 @@ class TelegramProtectionService:
             
             # Evaluate with TruePresence
             result = self.orchestrator.evaluate(session, event)
+            
+            # Pull threat_categories from adversarial role output and inject into final
+            adversarial_output = result.get("roles", {}).get("adversarial", {})
+            threat_categories = adversarial_output.get("threat_categories", [])
+            block_reason = adversarial_output.get("block_reason", "")
+            result["final"]["threat_categories"] = threat_categories
+            result["final"]["block_reason"] = block_reason
             
             # Convert to Telegram action
             action = self.adapter.build_response(result["final"])
@@ -243,7 +248,7 @@ class TelegramProtectionService:
         review_id = str(uuid.uuid4())
         review_data["review_id"] = review_id
         review_data["status"] = "pending"
-        review_data["created_at"] = datetime.datetime.utcnow().isoformat()
+        review_data["created_at"] = datetime.now(timezone.utc).isoformat()
         review_data["tenant_id"] = tenant_id
         
         self.pending_reviews[tenant_id][review_id] = review_data
@@ -265,16 +270,19 @@ class TelegramProtectionService:
         review["status"] = "resolved"
         review["admin_decision"] = admin_decision
         review["admin_notes"] = admin_notes
-        review["resolved_at"] = datetime.datetime.utcnow().isoformat()
+        review["resolved_at"] = datetime.now(timezone.utc).isoformat()
         
         return True
 
-    async def execute_review_decision(self, review_id: str):
+    async def execute_review_decision(self, review_id: str, tenant_id: str = None):
         """Execute the admin decision for a review."""
-        if review_id not in self.pending_reviews:
+        tenant_id = tenant_id or self.tenant_id
+        tenant_reviews = self.pending_reviews.get(tenant_id, {})
+        
+        if review_id not in tenant_reviews:
             return {"status": "failed", "error": "Review not found"}
             
-        review = self.pending_reviews[review_id]
+        review = tenant_reviews[review_id]
         
         if review.get("status") != "resolved":
             return {"status": "failed", "error": "Review not yet resolved by admin"}
@@ -308,7 +316,7 @@ class TelegramProtectionService:
             payload = {
                 "chat_id": chat_id,
                 "user_id": user_id,
-                "until_date": int(datetime.datetime.utcnow().timestamp()) + 60  # 1 minute from now
+                "until_date": int(datetime.now(timezone.utc).timestamp()) + 60  # 1 minute from now
             }
             
         elif admin_decision == "warn":
@@ -414,7 +422,8 @@ class TelegramProtectionService:
             user_info = review_data["user_info"]
             chat_info = review_data["chat_info"]
             
-            base_url = os.environ.get("BASE_URL", "https://your-domain.com")
+            base_url = os.environ.get("BASE_URL")
+            review_link = f"\n👉 Review dashboard: {base_url}/reviews/{review_id}?tenant={tenant_id}" if base_url else ""
             
             notification_message = (
                 f"🚨 [{tenant_id}] MANUAL REVIEW REQUIRED 🚨\n\n"
@@ -424,8 +433,8 @@ class TelegramProtectionService:
                 f"💬 Chat: {chat_info.get('title', 'Private')} (ID: {chat_info.get('id', 'N/A')})\n"
                 f"📱 Message: {review_data['message_text'][:100]}...\n"
                 f"⚠️  Threats: {', '.join(review_data['threat_categories'])}\n"
-                f"🔍 Confidence: {review_data['action'].get('confidence', 0):.2f}\n\n"
-                f"👉 Review dashboard: {base_url}/reviews/{review_id}?tenant={tenant_id}"
+                f"🔍 Confidence: {review_data['action'].get('confidence', 0):.2f}"
+                f"{review_link}"
             )
             
             # Send via Telegram Bot API
@@ -474,11 +483,8 @@ async def telegram_webhook(request: Request):
         
         logger.info(f"[{tenant_id}] Received Telegram update: {update.get('update_id')}")
         
-        # Create tenant-specific service instance
-        tenant_service = TelegramProtectionService(tenant_id=tenant_id)
-        
-        # Process through TruePresence
-        action = await tenant_service.process_update(update)
+        # Use the module-level singleton — NOT a fresh instance per request
+        action = await service.process_update(update, tenant_id=tenant_id)
         
         if not action:
             return {"ok": True, "action": "ignored"}
@@ -503,15 +509,11 @@ async def telegram_webhook(request: Request):
 async def get_status(request: Request):
     """Get protection service status for a tenant."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
-    tenant_service = TelegramProtectionService(tenant_id=tenant_id)
-    
-    # Check if this is a request for all tenants
     show_all = request.query_params.get("all", "false").lower() == "true"
-    
     if show_all and tenant_id == "default":
-        return tenant_service.get_status("all")
+        return service.get_status("all")
     else:
-        return tenant_service.get_status(tenant_id)
+        return service.get_status(tenant_id)
 
 
 @router.post("/groups/{group_id}/protect")
@@ -535,28 +537,18 @@ async def get_group_members(group_id: int):
 async def get_all_reviews(request: Request):
     """Get all pending manual reviews for a tenant."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
-    tenant_service = TelegramProtectionService(tenant_id=tenant_id)
-    
-    reviews = tenant_service.get_pending_reviews(tenant_id)
-    return {
-        "tenant_id": tenant_id,
-        "pending_reviews": reviews,
-        "count": len(reviews)
-    }
+    reviews = service.get_pending_reviews(tenant_id)
+    return {"tenant_id": tenant_id, "pending_reviews": reviews, "count": len(reviews)}
 
 
 @router.get("/reviews/{review_id}")
 async def get_review_details(review_id: str, request: Request):
     """Get details of a specific manual review."""
     tenant_id = request.headers.get("X-Tenant-ID", "default")
-    tenant_service = TelegramProtectionService(tenant_id=tenant_id)
-    
-    reviews = tenant_service.get_pending_reviews(tenant_id)
+    reviews = service.get_pending_reviews(tenant_id)
     review = next((r for r in reviews if r["review_id"] == review_id), None)
-    
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
-        
     return review
 
 

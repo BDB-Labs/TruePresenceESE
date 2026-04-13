@@ -7,7 +7,11 @@ and multi-node session sharing across distributed deployments.
 
 import json
 import time
+import logging
 from typing import Dict, Any, Optional, List
+
+logger = logging.getLogger(__name__)
+
 try:
     import redis
     REDIS_AVAILABLE = True
@@ -39,12 +43,13 @@ class DistributedRuntime:
                 # Test connection
                 self.redis_client.ping()
                 self.available = True
+                logger.info("DistributedRuntime connected to Redis")
             except Exception as e:
-                print(f"Warning: Could not connect to Redis: {e}")
+                logger.warning(f"Could not connect to Redis: {e}")
                 self.redis_client = None
                 self.available = False
         else:
-            print("Warning: Redis package not available. Using in-memory fallback.")
+            logger.warning("Redis package not available. Using in-memory fallback.")
             self.redis_client = None
             self.available = False
             self._memory_store = {}
@@ -85,7 +90,7 @@ class DistributedRuntime:
                 
             return True
         except Exception as e:
-            print(f"Error storing session: {e}")
+            logger.error(f"Error storing session: {e}")
             return False
     
     def load_session(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -113,7 +118,7 @@ class DistributedRuntime:
                     
             return None
         except Exception as e:
-            print(f"Error loading session: {e}")
+            logger.error(f"Error loading session: {e}")
             return None
     
     def append_event(self, session_id: str, event: Dict[str, Any]) -> bool:
@@ -144,7 +149,7 @@ class DistributedRuntime:
                 
             return True
         except Exception as e:
-            print(f"Error appending event: {e}")
+            logger.error(f"Error appending event: {e}")
             return False
     
     def get_events(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -170,7 +175,7 @@ class DistributedRuntime:
                 events = self._memory_store.get(key, [])
                 return events[-limit:]
         except Exception as e:
-            print(f"Error getting events: {e}")
+            logger.error(f"Error getting events: {e}")
             return []
     
     def delete_session(self, session_id: str) -> bool:
@@ -195,7 +200,7 @@ class DistributedRuntime:
                 
             return True
         except Exception as e:
-            print(f"Error deleting session: {e}")
+            logger.error(f"Error deleting session: {e}")
             return False
     
     def update_session_field(self, session_id: str, field: str, value: Any) -> bool:

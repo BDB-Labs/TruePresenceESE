@@ -42,7 +42,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     try:
         while True:
             data = await websocket.receive_text()
-            event = json.loads(data)
+            try:
+                event = json.loads(data)
+            except json.JSONDecodeError as e:
+                await websocket.send_json({"type": "error", "message": f"Invalid JSON: {e}"})
+                continue
             
             # Handle mode setting (for test/gatekeeper modes)
             if event.get("event_type") == "set_mode":

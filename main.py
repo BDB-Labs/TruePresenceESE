@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """TruePresence Server - Entry point"""
+import os
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from truepresence.api.ws_server import router as ws_router
 from truepresence.api.server import app as rest_app
-from truepresence.api import ws_server
-from truepresence.adapters import telegram_bot
-from truepresence.exceptions import TruePresenceError
 
 app = FastAPI(title="TruePresence")
 
@@ -18,28 +16,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(rest_app.router, tags=["rest"])
-app.include_router(ws_server.router, tags=["websocket"])
-app.include_router(telegram_bot.router, tags=["telegram"])
+# Mount REST API as sub-application (rest_app is a FastAPI instance, not a router)
+app.mount("/api", rest_app)
 
-@app.exception_handler(TruePresenceError)
-async def tp_exception_handler(request: Request, exc: TruePresenceError):
-    return JSONResponse(
-        status_code=500,
-        content={"error": exc.__class__.__name__, "message": exc.message, "details": exc.details}
-    )
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content={"error": "InternalError", "message": str(exc)}
-    )
+# WebSocket router mounts directly
+app.include_router(ws_router, tags=["websocket"])
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=port,
+        reload=False,
     )
