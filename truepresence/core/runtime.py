@@ -19,5 +19,4 @@ logger = logging.getLogger(__name__)
 
 logger.info("Initializing shared TruePresenceOrchestratorV3 runtime")
 orchestrator = TruePresenceOrchestratorV3()
-logger.info(f"Shared runtime ready - orchestrator type: {type(orchestrator).__name__}")
-logger.info(f"Orchestrator has health_check: {hasattr(orchestrator, 'health_check')}")
+logger.info("Shared runtime ready")

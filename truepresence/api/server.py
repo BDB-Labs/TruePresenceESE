@@ -195,8 +195,17 @@ def evaluate(request: EvaluateRequest):
 def health_check():
     """Health check endpoint."""
     try:
-        shared_orchestrator.health_check()
-        return {"status": "ok"}
+        orchestrator_type = type(shared_orchestrator).__name__
+        has_health_check = hasattr(shared_orchestrator, 'health_check')
+        
+        if has_health_check:
+            shared_orchestrator.health_check()
+        
+        return {
+            "status": "ok",
+            "orchestrator": orchestrator_type,
+            "has_health_check": has_health_check
+        }
     except Exception as e:
         logger.error(f"Health check failed: {e}", exc_info=True)
         return JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})

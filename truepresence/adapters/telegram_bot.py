@@ -209,9 +209,6 @@ class TelegramProtectionService:
         """Get service status for a tenant or all tenants."""
         tenant_id = tenant_id or self.tenant_id
         
-        logger.info(f"get_status called - orchestrator type: {type(self.orchestrator)}")
-        logger.info(f"orchestrator module: {self.orchestrator.__class__.__module__}")
-        
         if tenant_id == "all":
             # Return status for all tenants
             tenant_statuses = {}
