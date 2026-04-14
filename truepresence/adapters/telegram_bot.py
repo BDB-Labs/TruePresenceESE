@@ -217,7 +217,7 @@ class TelegramProtectionService:
                     "protected_groups": len(self.protected_groups.get(tid, set())),
                     "active_sessions": len(self.user_sessions.get(tid, {})),
                     "pending_reviews": len(self.pending_reviews.get(tid, {})),
-                    "orchestrator_health": self.orchestrator.health_check()
+                    "orchestrator_type": type(self.orchestrator).__name__
                 }
             
             return {
