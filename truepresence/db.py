@@ -13,14 +13,41 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def _build_database_url() -> str:
+    """
+    Get the database URL — tries DATABASE_URL first, then assembles
+    from individual Railway Postgres variables as fallback.
+    """
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        return url
+
+    # Railway injects these individually when DATABASE_URL isn't linked
+    host = os.environ.get("PGHOST") or os.environ.get("POSTGRES_HOST")
+    port = os.environ.get("PGPORT") or os.environ.get("POSTGRES_PORT", "5432")
+    user = os.environ.get("PGUSER") or os.environ.get("POSTGRES_USER")
+    password = os.environ.get("PGPASSWORD") or os.environ.get("POSTGRES_PASSWORD")
+    database = os.environ.get("PGDATABASE") or os.environ.get("POSTGRES_DB")
+
+    if all([host, user, password, database]):
+        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
+    raise RuntimeError(
+        "No database connection info found. Set DATABASE_URL or "
+        "PGHOST/PGUSER/PGPASSWORD/PGDATABASE in environment variables."
+    )
+
+
+DATABASE_URL = _build_database_url() if any(
+    k in os.environ for k in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
+) else None
 
 
 def get_connection():
     """Get a raw psycopg2 connection."""
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL environment variable not set")
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    url = _build_database_url()
+    return psycopg2.connect(url, cursor_factory=RealDictCursor)
 
 
 @contextmanager
