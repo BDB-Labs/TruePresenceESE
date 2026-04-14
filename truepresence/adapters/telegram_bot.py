@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 # Import TruePresence components
-from truepresence.core.orchestrator_v3 import TruePresenceOrchestratorV3
+from truepresence.core.orchestrator_v3 import TruePresenceOrchestratorV3 as TruePresenceOrchestratorV3
 from truepresence.adapters.telegram import TelegramAdapter
 from truepresence.exceptions import TruePresenceError, OrchestratorError
 
