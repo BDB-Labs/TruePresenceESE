@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import uuid
 import logging
 from truepresence.core.session import Session
+from truepresence.core.runtime import orchestrator as shared_orchestrator
 from truepresence.exceptions import TruePresenceError, OrchestratorError, RoleError
 
 # Configure logging - CRITICAL systems must log
@@ -17,9 +18,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TruePresence ESE API", version="1.0.0")
 SESSIONS = {}
-
-# Orchestrator factory - creates per-session orchestrators
-_orchestrators = {}
 
 
 # Exception handlers - CRITICAL: System does NOT fail silently
@@ -49,14 +47,6 @@ async def general_exception_handler(request, exc: Exception):
             "details": {"exception_type": type(exc).__name__}
         }
     )
-
-
-def get_orchestrator(session_id: str):
-    """Get or create orchestrator for a specific session."""
-    if session_id not in _orchestrators:
-        from truepresence.core.orchestrator_v3 import TruePresenceOrchestratorV3
-        _orchestrators[session_id] = TruePresenceOrchestratorV3()
-    return _orchestrators[session_id]
 
 
 # Request Models
@@ -178,9 +168,8 @@ def evaluate(request: EvaluateRequest):
                 "response_time_ms": challenge.response_time_ms
             }
     
-    # Get per-session orchestrator and evaluate
-    orchestrator = get_orchestrator(request.session_id)
-    result = orchestrator.evaluate(
+    # Use shared orchestrator
+    result = shared_orchestrator.evaluate(
         session_id=request.session_id,
         session={"session_id": request.session_id, "mode": request.mode},
         event=event_dict
@@ -204,31 +193,24 @@ def evaluate(request: EvaluateRequest):
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint — returns status only, no internal state exposed."""
-    unhealthy = []
-    for sid, orch in _orchestrators.items():
-        try:
-            orch.health_check()
-        except Exception as e:
-            logger.error(f"Orchestrator {sid} failed health check: {e}", exc_info=True)
-            unhealthy.append(sid)
-
-    if unhealthy:
-        return JSONResponse(status_code=503, content={"status": "degraded", "unhealthy_sessions": len(unhealthy)})
-    return {"status": "ok", "active_sessions": len(_orchestrators)}
+    """Health check endpoint."""
+    try:
+        shared_orchestrator.health_check()
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        return JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})
 
 
 @app.get("/v1/sessions/{session_id}/cluster")
 def get_session_cluster(session_id: str):
     """Get connected sessions in the identity graph."""
-    orchestrator = get_orchestrator(session_id)
-    cluster = orchestrator.get_session_cluster(session_id)
+    cluster = shared_orchestrator.get_session_cluster(session_id)
     return {"session_id": session_id, "cluster": list(cluster)}
 
 
 @app.post("/v1/sessions/{session_id}/reset")
 def reset_session(session_id: str):
     """Reset session memory."""
-    orchestrator = get_orchestrator(session_id)
-    orchestrator.memory.clear()
+    shared_orchestrator.memory.clear()
     return {"session_id": session_id, "status": "reset"}

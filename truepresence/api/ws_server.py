@@ -4,14 +4,13 @@ from typing import Dict, List
 import json
 import uuid
 import time
-from truepresence.ese_runtime import ESEEnsembleRuntime
+from truepresence.core.runtime import orchestrator as shared_orchestrator
 from truepresence.challenges.validator import ChallengeValidator
 from truepresence.redteam.evaluate import RedTeamEvaluator
 
 router = APIRouter()
 
-# Initialize Core Components
-ensemble = ESEEnsembleRuntime()
+# Shared orchestrator — same instance as Telegram and REST API
 validator = ChallengeValidator()
 redteam_evaluator = RedTeamEvaluator()
 
@@ -64,9 +63,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "payload": val_result
                 }
 
-            # 2. Store and Evaluate via Ensemble (Phase 1)
+            # 2. Store and Evaluate via shared orchestrator
             session_events[session_id].append(event)
-            result = ensemble.evaluate(session_id, session_events[session_id])
+            result = shared_orchestrator.evaluate(
+                session_id=session_id,
+                session={"session_id": session_id, "mode": session_mode},
+                event=event
+            )
+            trust_score = result.get("human_probability", 0.5)
             
             # 3. Self-Evaluation for Test Mode (Red Team Integration)
             if session_mode == "test" and event.get("attack_type"):
@@ -88,9 +92,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             
             # 3. Trust Update
             await websocket.send_json({"type": "trust_update", "data": result})
-            
+
             # 4. Adaptive Challenge Injection (Uncertainty Zone)
-            score = result["trust_score"]
+            score = trust_score
             if 0.35 < score < 0.75:
                 challenge = {
                     "id": str(uuid.uuid4()),
