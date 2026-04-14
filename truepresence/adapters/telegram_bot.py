@@ -234,7 +234,7 @@ class TelegramProtectionService:
                 "protected_groups": len(self.protected_groups.get(tenant_id, set())),
                 "active_sessions": len(self.user_sessions.get(tenant_id, {})),
                 "pending_reviews": len(self.pending_reviews.get(tenant_id, {})),
-                "orchestrator_health": self.orchestrator.health_check()
+                "orchestrator_type": type(self.orchestrator).__name__
             }
 
     def add_pending_review(self, review_data: Dict[str, Any], tenant_id: str = None):
