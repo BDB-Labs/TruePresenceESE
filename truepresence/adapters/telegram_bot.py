@@ -213,11 +213,14 @@ class TelegramProtectionService:
             # Return status for all tenants
             tenant_statuses = {}
             for tid in self.user_sessions.keys():
+                orch_type = "Unknown"
+                if hasattr(self.orchestrator, '__class__'):
+                    orch_type = self.orchestrator.__class__.__name__
                 tenant_statuses[tid] = {
                     "protected_groups": len(self.protected_groups.get(tid, set())),
                     "active_sessions": len(self.user_sessions.get(tid, {})),
                     "pending_reviews": len(self.pending_reviews.get(tid, {})),
-                    "orchestrator_type": type(self.orchestrator).__name__
+                    "orchestrator_type": orch_type
                 }
             
             return {
@@ -227,14 +230,18 @@ class TelegramProtectionService:
                 "total_tenants": len(tenant_statuses)
             }
         else:
-            # Return status for specific tenant
+            # Return status for specific tenant - with explicit safe access
+            orch_type = "Unknown"
+            if hasattr(self.orchestrator, '__class__'):
+                orch_type = self.orchestrator.__class__.__name__
+            
             return {
                 "status": "healthy",
                 "tenant_id": tenant_id,
                 "protected_groups": len(self.protected_groups.get(tenant_id, set())),
                 "active_sessions": len(self.user_sessions.get(tenant_id, {})),
                 "pending_reviews": len(self.pending_reviews.get(tenant_id, {})),
-                "orchestrator_type": type(self.orchestrator).__name__
+                "orchestrator_type": orch_type
             }
 
     def add_pending_review(self, review_data: Dict[str, Any], tenant_id: str = None):
