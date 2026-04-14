@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 # Import TruePresence components
-from truepresence.core.orchestrator import TruePresenceOrchestrator
+from truepresence.core.orchestrator_v3 import TruePresenceOrchestratorV3
 from truepresence.adapters.telegram import TelegramAdapter
 from truepresence.exceptions import TruePresenceError, OrchestratorError
 
@@ -46,7 +46,7 @@ class TelegramProtectionService:
         logger.info(f"Initializing TelegramProtectionService for tenant: {tenant_id}")
 
         self.tenant_id = tenant_id
-        self.orchestrator = TruePresenceOrchestrator()
+        self.orchestrator = TruePresenceOrchestratorV3()
         
         # Load tenant-specific configuration
         self.tenant_config = self._load_tenant_config(tenant_id)
