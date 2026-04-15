@@ -1,5 +1,5 @@
 from typing import List
-from core.events import Event
+from truepresence.core.events import Event
 
 
 def compute_relay_risk(events: List[Event]) -> float:

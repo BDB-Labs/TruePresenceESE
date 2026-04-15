@@ -1,5 +1,5 @@
-from challenges.engine import Challenge
-from challenges.response import ChallengeResponse
+from truepresence.challenges.engine import Challenge
+from truepresence.challenges.response import ChallengeResponse
 
 
 def score_challenge_response(challenge: Challenge, response: ChallengeResponse) -> dict:

@@ -1,5 +1,5 @@
 from typing import List
-from core.events import Event
+from truepresence.core.events import Event
 
 
 def compute_ai_mediation(events: List[Event]) -> float:

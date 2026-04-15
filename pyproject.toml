@@ -3,18 +3,34 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ese-cli"
-version = "1.0.1"
-description = "Ensemble Software Engineering (ESE) CLI"
+name = "truepresence-ese"
+version = "1.0.0"
+description = "TruePresenceESE - Telegram Bot Detection System"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "typer>=0.12",
   "questionary>=2.0",
   "PyYAML>=6.0",
-  "pydantic>=2.7",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
+  "python-telegram-bot>=21.2",
+  "redis>=5.2",
+  "python-dotenv>=1.0",
+  "pydantic>=2.7",
+  "orjson>=3.10",
+  "aiohttp>=3.11",
+  "numpy>=1.26",
+  "tenacity>=9.0",
+  "psycopg2-binary>=2.9",
+  "passlib[bcrypt]>=1.7",
+  "python-jose[cryptography]>=3.3",
+  "python-multipart>=0.0",
+  "httpx>=0.28",
+  "gunicorn>=23.0",
+  "requests>=2.32",
+  "certifi>=2025",
+  "urllib3>=2.3",
 ]
 
 [project.optional-dependencies]
@@ -25,10 +41,11 @@ dev = [
 ]
 
 [project.scripts]
+truepresence = "truepresence.main:main"
 ese = "ese.cli:app"
 
 [tool.setuptools.packages.find]
-include = ["ese*"]
+include = ["truepresence*", "ese*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

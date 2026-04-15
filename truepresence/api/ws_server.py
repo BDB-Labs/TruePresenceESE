@@ -1,11 +1,12 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from collections import defaultdict
-from typing import Dict, List
 import json
 import uuid
-import time
-from truepresence.core.runtime import orchestrator as shared_orchestrator
+from collections import defaultdict
+from typing import Dict, List
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
 from truepresence.challenges.validator import ChallengeValidator
+from truepresence.core.runtime import decision_engine as shared_decision_engine
 from truepresence.redteam.evaluate import RedTeamEvaluator
 
 router = APIRouter()
@@ -65,11 +66,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # 2. Store and Evaluate via shared orchestrator
             session_events[session_id].append(event)
-            result = shared_orchestrator.evaluate(
+            result = shared_decision_engine.evaluate(
                 session_id=session_id,
+                surface="web_guard",
                 session={"session_id": session_id, "mode": session_mode},
                 event=event
-            )
+            ).to_response()
             trust_score = result.get("human_probability", 0.5)
             
             # 3. Self-Evaluation for Test Mode (Red Team Integration)
@@ -111,4 +113,3 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         if session_id in connections:
             connections[session_id].remove(websocket)
-

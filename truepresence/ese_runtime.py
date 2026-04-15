@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 from typing import Dict, Any, List
-from core.events import Event
+from truepresence.core.events import Event
 from truepresence.adapter.evidence_adapter import EvidenceAdapter
 from truepresence.core.roles.base import (
     LivenessRole, RelayRole, MediationRole, AdversarialRole, SynthesizerRole

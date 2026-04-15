@@ -1,6 +1,6 @@
 import uuid
-from redteam.attack_generator import generate_bot_session, generate_llm_user, generate_relay
-from redteam.evaluate import run_attack
+from truepresence.redteam.attack_generator import generate_bot_session, generate_llm_user, generate_relay
+from truepresence.redteam.evaluate import run_attack
 
 
 def run_suite():

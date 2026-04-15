@@ -1,13 +1,20 @@
-from fastapi import FastAPI, HTTPException
+import logging
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
-import uuid
-import logging
+
+from truepresence.core.runtime import (
+    decision_engine as shared_decision_engine,
+)
+from truepresence.core.runtime import (
+    orchestrator as shared_orchestrator,
+)
 from truepresence.core.session import Session
-from truepresence.core.runtime import orchestrator as shared_orchestrator
-from truepresence.exceptions import TruePresenceError, OrchestratorError, RoleError
+from truepresence.exceptions import TruePresenceError
 
 # Configure logging - CRITICAL systems must log
 logging.basicConfig(
@@ -89,11 +96,13 @@ class TemporalSignals(BaseModel):
 
 class EvaluateResponse(BaseModel):
     """Response model for /v1/evaluate endpoint."""
+    state: str
     human_probability: float
     bot_probability: float
     confidence: float
     decision: str  # allow|challenge|block|review
     risk_factors: List[str]
+    reason_codes: List[str]
     reasoning_trace: Dict[str, str]
     temporal_signals: TemporalSignals
     session_id: str
@@ -168,20 +177,30 @@ def evaluate(request: EvaluateRequest):
                 "response_time_ms": challenge.response_time_ms
             }
     
-    # Use shared orchestrator
-    result = shared_orchestrator.evaluate(
+    result = shared_decision_engine.evaluate(
         session_id=request.session_id,
-        session={"session_id": request.session_id, "mode": request.mode},
-        event=event_dict
-    )
+        surface=request.context.get("platform", "web_guard") if request.context else "web_guard",
+        session={"session_id": request.session_id, "mode": request.mode, **(request.context or {})},
+        event=event_dict,
+        challenge_results=[
+            {
+                "challenge_id": challenge.challenge_id,
+                "response": challenge.response,
+                "response_time_ms": challenge.response_time_ms,
+            }
+            for challenge in (request.challenge_responses or [])
+        ],
+    ).to_response()
     
     # Build response
     return EvaluateResponse(
+        state=result.get("state", "OBSERVE"),
         human_probability=result.get("human_probability", 0.5),
         bot_probability=result.get("bot_probability", 0.5),
         confidence=result.get("confidence", 0.5),
         decision=result.get("decision", "review"),
         risk_factors=result.get("risk_factors", []),
+        reason_codes=result.get("reason_codes", []),
         reasoning_trace=result.get("reasoning_trace", {}),
         temporal_signals=TemporalSignals(
             drift=result.get("temporal_signals", {}).get("drift", 0.0),

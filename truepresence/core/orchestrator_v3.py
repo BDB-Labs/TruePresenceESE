@@ -6,16 +6,22 @@ into a unified evaluate method, providing enhanced cross-session detection and
 distributed deployment support.
 """
 
-from typing import Dict, Any, Optional
-import os
 import logging
-from truepresence.core.synthesis.synth import EnsembleSynthesis
-from truepresence.core.memory.session_memory import SessionMemory
+import os
+from typing import Any, Dict
+
 from truepresence.adaptive.weighting import AdaptiveWeights
 from truepresence.agents.council import AgentCouncil
-from truepresence.memory.identity_graph import IdentityGraph
-from truepresence.runtime.distributed import DistributedRuntime
+from truepresence.core.synthesis.synth import EnsembleSynthesis
+from truepresence.evidence import (
+    ArgumentGraphBuilder,
+    EvidencePacket,
+    EvidencePacketBuilder,
+)
 from truepresence.exceptions import OrchestratorError, wrap_role_error
+from truepresence.memory.identity_graph import IdentityGraph
+from truepresence.memory.session_timeline import SessionTimeline
+from truepresence.runtime.distributed import DistributedRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +44,11 @@ class TruePresenceOrchestratorV3:
             redis_url: Optional Redis URL — defaults to REDIS_URL env var
         """
         # Core components
-        self.memory = SessionMemory()
+        self.memory = SessionTimeline()
         self.adaptive = AdaptiveWeights()
         self.synthesis = EnsembleSynthesis()
+        self.packet_builder = EvidencePacketBuilder()
+        self.argument_graph_builder = ArgumentGraphBuilder()
 
         # Enhanced components
         self.council = AgentCouncil()
@@ -52,7 +60,7 @@ class TruePresenceOrchestratorV3:
         if redis_url:
             try:
                 self.distributed = DistributedRuntime(redis_url=redis_url)
-                logger.info(f"DistributedRuntime connected to Redis")
+                logger.info("DistributedRuntime connected to Redis")
             except Exception as e:
                 logger.warning(f"Could not initialize distributed runtime: {e}")
 
@@ -63,7 +71,11 @@ class TruePresenceOrchestratorV3:
     def _initialize_roles(self):
         """Initialize available roles dynamically using unified Role interface."""
         from truepresence.core.roles.base import (
-            LivenessRole, AdversarialRole, MediationRole, RelayRole, SynthesizerRole
+            AdversarialRole,
+            LivenessRole,
+            MediationRole,
+            RelayRole,
+            SynthesizerRole,
         )
         
         role_mapping = {
@@ -86,37 +98,63 @@ class TruePresenceOrchestratorV3:
                 raise OrchestratorError(
                     message=f"Failed to initialize role {role_name}",
                     details={"role": role_name, "error": str(e)}
-                )
+                ) from e
     
-    def build_evidence(self, session: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
-        """Build evidence from session and event data."""
-        evidence = {
-            "session": dict(session),
-            "event": dict(event),
-            "historical": list(self.memory.window(50))
-        }
-        
+    def build_evidence(
+        self,
+        session: Dict[str, Any],
+        event: Dict[str, Any],
+        evidence_packet: EvidencePacket | None = None,
+        argument_graph=None,
+    ) -> tuple[Dict[str, Any], EvidencePacket, Any]:
+        """Build role evidence from a product-level evidence packet."""
+        session_id = session.get("session_id") or event.get("session_id")
+        packet = evidence_packet or self.packet_builder.build(
+            session_id=session_id,
+            surface=event.get("context", {}).get("platform", "unknown"),
+            event=event,
+            session=session,
+            session_history=list(self.memory.window(50)),
+            tenant_id=session.get("tenant_id"),
+        )
+
         temporal_drift = self.memory.drift()
-        evidence["temporal_drift"] = temporal_drift
-        
-        # Add cross-session context if available
-        session_id = session.get("session_id")
+        packet.metadata["temporal_drift"] = temporal_drift
+
         if session_id:
-            # Check identity graph for connected sessions
             connected = self.identity_graph.get_connected_sessions(session_id)
-            evidence["cross_session_connections"] = len(connected)
-            
+            packet.identity_refs["connected_sessions"] = len(connected)
             if connected:
-                cluster_risk = self.identity_graph.get_session_risk(session_id)
-                evidence["cluster_risk"] = cluster_risk
-        
-        return evidence
+                packet.identity_refs["cluster_risk"] = self.identity_graph.get_session_risk(session_id)
+
+        graph = argument_graph or self.argument_graph_builder.build(packet)
+        evidence = packet.as_role_evidence(graph)
+        evidence["historical"] = list(self.memory.window(50))
+        evidence["temporal_drift"] = temporal_drift
+        evidence["cross_session_connections"] = packet.identity_refs.get("connected_sessions", 0)
+        evidence["cluster_risk"] = packet.identity_refs.get("cluster_risk", 0.0)
+        evidence["argument_graph"] = graph.summary()
+        return evidence, packet, graph
+
+    def run(self, evidence_packet: EvidencePacket, argument_graph, session: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        session_data = dict(session or evidence_packet.session_context or {})
+        session_data.setdefault("session_id", evidence_packet.session_id)
+        return self._evaluate_internal(
+            session_id=evidence_packet.session_id,
+            session=session_data,
+            event=evidence_packet.latest_event,
+            evidence_packet=evidence_packet,
+            argument_graph=argument_graph,
+        )
     
     def evaluate(
         self,
-        session_id: str,
-        session: Dict[str, Any],
-        event: Dict[str, Any]
+        session_id: str | Dict[str, Any] | None = None,
+        session: Dict[str, Any] | None = None,
+        event: Dict[str, Any] | None = None,
+        *,
+        evidence_packet: EvidencePacket | None = None,
+        argument_graph=None,
     ) -> Dict[str, Any]:
         """
         Main evaluation method with full integration.
@@ -129,11 +167,54 @@ class TruePresenceOrchestratorV3:
         Returns:
             Complete decision trace with enhanced metrics
         """
-        # Store event in memory
-        self.memory.add(event)
-        
-        # Build evidence
-        evidence = self.build_evidence(session, event)
+        if event is None and isinstance(session_id, dict) and isinstance(session, dict):
+            session_data = dict(session_id)
+            event_data = dict(session)
+            resolved_session_id = session_data.get("session_id") or event_data.get("session_id")
+            return self._evaluate_internal(
+                session_id=resolved_session_id,
+                session=session_data,
+                event=event_data,
+                evidence_packet=evidence_packet,
+                argument_graph=argument_graph,
+            )
+
+        if evidence_packet is not None:
+            session_data = dict(session or evidence_packet.session_context or {})
+            session_data.setdefault("session_id", evidence_packet.session_id)
+            return self.run(evidence_packet, argument_graph, session=session_data)
+
+        if session_id is None or session is None or event is None:
+            raise OrchestratorError(
+                message="evaluate requires either (session_id, session, event) or evidence_packet",
+                details={"session_id": session_id},
+            )
+
+        return self._evaluate_internal(
+            session_id=str(session_id),
+            session=dict(session),
+            event=dict(event),
+            evidence_packet=evidence_packet,
+            argument_graph=argument_graph,
+        )
+
+    def _evaluate_internal(
+        self,
+        *,
+        session_id: str,
+        session: Dict[str, Any],
+        event: Dict[str, Any],
+        evidence_packet: EvidencePacket | None = None,
+        argument_graph=None,
+    ) -> Dict[str, Any]:
+        self.memory.add_event(event)
+
+        evidence, packet, graph = self.build_evidence(
+            session,
+            event,
+            evidence_packet=evidence_packet,
+            argument_graph=argument_graph,
+        )
         
         # Run all roles
         role_outputs = {}
@@ -143,7 +224,7 @@ class TruePresenceOrchestratorV3:
                     role_outputs[role_name] = role.evaluate(evidence, session)
                 except Exception as e:
                     logger.error(f"Role {role_name} FAILED during evaluate: {e}", exc_info=True)
-                    raise wrap_role_error(role_name, "evaluate", e)
+                    raise wrap_role_error(role_name, "evaluate", e) from e
         
         # Run agent council for structured debate
         council_result = self.council.evaluate(evidence, session)
@@ -204,6 +285,8 @@ class TruePresenceOrchestratorV3:
         return {
             "session_id": session_id,
             "evidence": evidence,
+            "evidence_packet": packet.model_dump(),
+            "argument_graph": graph.model_dump(),
             "roles": role_outputs,
             "council": council_result,
             "synthesis": final_result,

@@ -13,10 +13,13 @@ With REDIS_URL set, all state survives redeploys and scales horizontally.
 """
 
 import logging
-from truepresence.core.orchestrator_v3 import TruePresenceOrchestratorV3
+
+from truepresence.decision.engine import TruePresenceDecisionEngine
+from truepresence.ensemble.orchestrator import TruePresenceEnsembleOrchestrator
 
 logger = logging.getLogger(__name__)
 
-logger.info("Initializing shared TruePresenceOrchestratorV3 runtime")
-orchestrator = TruePresenceOrchestratorV3()
+logger.info("Initializing shared TruePresence decision runtime")
+orchestrator = TruePresenceEnsembleOrchestrator()
+decision_engine = TruePresenceDecisionEngine(orchestrator=orchestrator)
 logger.info("Shared runtime ready")

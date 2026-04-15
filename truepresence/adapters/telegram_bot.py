@@ -7,16 +7,25 @@ TruePresence for bot detection and group protection.
 CRITICAL: This system does NOT fail silently.
 """
 
-import os
+import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
-import asyncio
+from typing import Any, Dict, List, Optional
+
 import httpx
+from fastapi import APIRouter, HTTPException, Request
+
+from truepresence.adapters.telegram import TelegramAdapter
+from truepresence.core.runtime import (
+    decision_engine as shared_decision_engine,
+)
+from truepresence.core.runtime import (
+    orchestrator as shared_orchestrator,
+)
+from truepresence.exceptions import TruePresenceError
 
 # Configure logging - CRITICAL systems must log
 logging.basicConfig(
@@ -27,11 +36,6 @@ logger = logging.getLogger(__name__)
 
 # Use router instead of separate app
 router = APIRouter(prefix="/telegram", tags=["telegram"])
-
-# Import TruePresence components — use shared singleton, not a local instance
-from truepresence.core.runtime import orchestrator as shared_orchestrator
-from truepresence.adapters.telegram import TelegramAdapter
-from truepresence.exceptions import TruePresenceError, OrchestratorError
 
 
 class TelegramProtectionService:
@@ -47,6 +51,7 @@ class TelegramProtectionService:
 
         self.tenant_id = tenant_id
         self.orchestrator = shared_orchestrator  # shared across all entry points
+        self.decision_engine = shared_decision_engine
         
         # Load tenant-specific configuration
         self.tenant_config = self._load_tenant_config(tenant_id)
@@ -155,17 +160,16 @@ class TelegramProtectionService:
             session = self.user_sessions[tenant_id][session_id]
             
             # Evaluate with TruePresence
-            result = self.orchestrator.evaluate(session, event)
-            
-            # Pull threat_categories from adversarial role output and inject into final
-            adversarial_output = result.get("roles", {}).get("adversarial", {})
-            threat_categories = adversarial_output.get("threat_categories", [])
-            block_reason = adversarial_output.get("block_reason", "")
-            result["final"]["threat_categories"] = threat_categories
-            result["final"]["block_reason"] = block_reason
+            result = self.decision_engine.evaluate(
+                session_id=session_id,
+                surface="telegram",
+                session=session,
+                event=event,
+                tenant_id=tenant_id,
+            ).to_response()
             
             # Convert to Telegram action
-            action = self.adapter.build_response(result["final"])
+            action = self.adapter.build_response(result["final"], tenant_id=tenant_id)
             
             logger.info(f"[{tenant_id}] Decision: {action['action']} (confidence: {action.get('confidence', 0):.2f})")
             
@@ -173,7 +177,7 @@ class TelegramProtectionService:
             action["evaluation"] = {
                 "human_probability": result["final"].get("human_probability"),
                 "risk_factors": result["final"].get("risk_factors", []),
-                "disagreement": result["final"].get("disagreement", 0)
+                "reason_codes": result["final"].get("reason_codes", []),
             }
             
             # Handle manual review cases
@@ -331,7 +335,7 @@ class TelegramProtectionService:
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
             payload = {
                 "chat_id": chat_id,
-                "text": f"⚠️ Warning: Your message violated group rules. Further violations may result in a ban.",
+                "text": "⚠️ Warning: Your message violated group rules. Further violations may result in a ban.",
                 "reply_to_message_id": message_id
             }
             
@@ -508,7 +512,7 @@ async def telegram_webhook(request: Request):
         
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Admin endpoints
@@ -723,7 +727,9 @@ async def health_check():
 # Run locally for testing
 if __name__ == "__main__":
     import uvicorn
-    
+
+    from truepresence.main import app
+
     port = int(os.environ.get("PORT", "8000"))
     
     logger.info(f"Starting TruePresence Telegram Protection on port {port}")

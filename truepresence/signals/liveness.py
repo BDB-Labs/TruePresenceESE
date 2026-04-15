@@ -1,6 +1,6 @@
 import statistics
 from typing import List
-from core.events import Event
+from truepresence.core.events import Event
 
 
 def compute_liveness(events: List[Event]) -> float:

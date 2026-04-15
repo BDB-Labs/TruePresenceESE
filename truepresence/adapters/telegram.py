@@ -5,12 +5,12 @@ Converts Telegram webhook events into TruePresence evaluation events.
 Includes detection for: Mirrors/Userbots, Crypto Miners, DMCA, Torrents, VNC, Illegal Content
 """
 
-import re
+import logging
 import math
+import re
 import time
 from collections import defaultdict, deque
-from typing import Dict, Any, Optional, List
-import logging
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -430,6 +430,7 @@ class TelegramAdapter:
         Returns:
             Action dictionary for Telegram bot to execute
         """
+        state = evaluation_result.get("state")
         decision = evaluation_result.get("decision", "allow")
         confidence = evaluation_result.get("confidence", 0.0)
         human_prob = evaluation_result.get("human_probability", 0.5)
@@ -438,6 +439,38 @@ class TelegramAdapter:
         threat_categories = evaluation_result.get("threat_categories", [])
         block_reason = evaluation_result.get("block_reason", "")
         
+        if state == "EJECT":
+            return {
+                "action": "ban",
+                "reason": block_reason or "Deterministic policy violation",
+                "confidence": confidence,
+                "threat_categories": threat_categories,
+                "tenant_id": tenant_id,
+            }
+        if state == "RESTRICT":
+            return {
+                "action": "kick",
+                "reason": block_reason or "Restricted pending further review",
+                "confidence": confidence,
+                "threat_categories": threat_categories,
+                "tenant_id": tenant_id,
+            }
+        if state == "STEP_UP_AUTH":
+            return {
+                "action": "challenge",
+                "reason": "Additional verification required",
+                "confidence": confidence,
+                "tenant_id": tenant_id,
+            }
+        if state == "OBSERVE":
+            return {
+                "action": "allow",
+                "reason": "Allowed with monitoring",
+                "confidence": confidence,
+                "tenant_id": tenant_id,
+                "monitor": True,
+            }
+
         # More aggressive blocking for confirmed threats
         if threat_categories:
             # Any confirmed threat category = immediate block

@@ -1,6 +1,7 @@
-from typing import List, Dict, Any
-from ese_stream import evaluate_incremental
+from typing import Any, Dict, List
+
 from truepresence.adaptive.reward import RewardEngine
+from truepresence.ese_stream import evaluate_incremental
 
 
 class RedTeamEvaluator:

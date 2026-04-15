@@ -1,9 +1,10 @@
-from typing import List, Dict, Any
-from core.events import Event
-from core.evidence import EvidenceBundle
-from signals.liveness import compute_liveness
-from signals.relay import compute_relay_risk
-from signals.ai_mediation import compute_ai_mediation
+from typing import List
+
+from truepresence.core.events import Event
+from truepresence.core.evidence import EvidenceBundle
+from truepresence.signals.ai_mediation import compute_ai_mediation
+from truepresence.signals.liveness import compute_liveness
+from truepresence.signals.relay import compute_relay_risk
 
 
 def build_evidence(session_id: str, events: List[Event]) -> EvidenceBundle:
