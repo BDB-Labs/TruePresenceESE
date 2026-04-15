@@ -5,6 +5,7 @@ from typing import Dict, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from truepresence.challenges.deterministic import stable_index
 from truepresence.challenges.validator import ChallengeValidator
 from truepresence.core.runtime import decision_engine as shared_decision_engine
 from truepresence.redteam.evaluate import RedTeamEvaluator
@@ -67,10 +68,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             # 2. Store and Evaluate via shared orchestrator
             session_events[session_id].append(event)
             result = shared_decision_engine.evaluate(
-                session_id=session_id,
                 surface="web_guard",
-                session={"session_id": session_id, "mode": session_mode},
-                event=event
+                session_id=session_id,
+                tenant_id="default",
+                session={"session_id": session_id, "mode": session_mode, "tenant_id": "default"},
+                event=event,
             ).to_response()
             trust_score = result.get("human_probability", 0.5)
             
@@ -100,7 +102,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             if 0.35 < score < 0.75:
                 challenge = {
                     "id": str(uuid.uuid4()),
-                    "prompt": CHALLENGE_PROMPTS[hash(session_id) % len(CHALLENGE_PROMPTS)],
+                    "prompt": CHALLENGE_PROMPTS[stable_index(session_id, len(CHALLENGE_PROMPTS))],
                     "created_at": __import__("time").time()
                 }
                 # Track in validator

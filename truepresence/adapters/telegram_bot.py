@@ -26,6 +26,7 @@ from truepresence.core.runtime import (
     orchestrator as shared_orchestrator,
 )
 from truepresence.exceptions import TruePresenceError
+from truepresence.surfaces.telegram.adapter import TelegramGuardAdapter
 
 # Configure logging - CRITICAL systems must log
 logging.basicConfig(
@@ -56,6 +57,7 @@ class TelegramProtectionService:
         # Load tenant-specific configuration
         self.tenant_config = self._load_tenant_config(tenant_id)
         self.adapter = TelegramAdapter(self.tenant_config)
+        self.guard_adapter = TelegramGuardAdapter(self.decision_engine, response_adapter=self.adapter)
         
         # Multi-tenant data structures
         self.admin_chats: Dict[str, set] = {tenant_id: set()}
@@ -160,16 +162,16 @@ class TelegramProtectionService:
             session = self.user_sessions[tenant_id][session_id]
             
             # Evaluate with TruePresence
-            result = self.decision_engine.evaluate(
+            decision_result = self.guard_adapter.evaluate_event(
                 session_id=session_id,
-                surface="telegram",
-                session=session,
-                event=event,
                 tenant_id=tenant_id,
-            ).to_response()
+                event=event,
+                context={"session": session},
+            )
+            result = decision_result.to_response()
             
             # Convert to Telegram action
-            action = self.adapter.build_response(result["final"], tenant_id=tenant_id)
+            action = self.guard_adapter.enforce(decision_result.decision)
             
             logger.info(f"[{tenant_id}] Decision: {action['action']} (confidence: {action.get('confidence', 0):.2f})")
             
@@ -384,7 +386,7 @@ class TelegramProtectionService:
                 "status": "failed",
                 "review_id": review_id,
                 "action": admin_decision,
-                "error": str(e)
+                "error": "admin_action_execution_failed",
             }
 
     async def _handle_manual_review(self, action: Dict[str, Any], update: Dict[str, Any], result: Dict[str, Any], tenant_id: str = None):
@@ -512,7 +514,7 @@ async def telegram_webhook(request: Request):
         
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Telegram webhook processing failed") from e
 
 
 # Admin endpoints

@@ -21,10 +21,6 @@ ALLOWED_ORIGINS = [
 
 
 def create_app() -> FastAPI:
-    from truepresence.adapters.telegram_bot import router as telegram_router
-    from truepresence.api.server import app as rest_app
-    from truepresence.api.ws_server import router as ws_router
-
     app = FastAPI(title="TruePresence", version="1.0.0")
     app.add_middleware(
         CORSMiddleware,
@@ -33,12 +29,30 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.mount("/api", rest_app)
-    app.include_router(ws_router, tags=["websocket"])
-    app.include_router(telegram_router)
+    try:
+        from truepresence.api.server import app as rest_app
+    except Exception as exc:
+        logger.warning("REST API unavailable during app bootstrap: %s", exc)
+    else:
+        app.mount("/api", rest_app)
+
+    try:
+        from truepresence.api.ws_server import router as ws_router
+    except Exception as exc:
+        logger.warning("WebSocket router unavailable during app bootstrap: %s", exc)
+    else:
+        app.include_router(ws_router, tags=["websocket"])
+
+    try:
+        from truepresence.adapters.telegram_bot import router as telegram_router
+    except Exception as exc:
+        logger.warning("Telegram router unavailable during app bootstrap: %s", exc)
+    else:
+        app.include_router(telegram_router)
+
     try:
         from truepresence.api.auth import router as auth_router
-    except ModuleNotFoundError as exc:
+    except Exception as exc:
         logger.warning("Auth router unavailable during app bootstrap: %s", exc)
     else:
         app.include_router(auth_router)

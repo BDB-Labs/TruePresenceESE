@@ -3,7 +3,10 @@ from __future__ import annotations
 from importlib import import_module
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
+    import tomli as tomllib
 
 from truepresence.adapters.telegram import TelegramAdapter
 from truepresence.decision.decision_object import DecisionState
@@ -38,9 +41,9 @@ def test_decision_engine_returns_contract_objects() -> None:
         },
     )
 
-    assert result.decision_object.state is DecisionState.ALLOW
+    assert result.decision_object.state == DecisionState.ALLOW.value
     assert result.evidence_packet.surface == "web_guard"
-    assert result.decision_artifact.argument_graph["claim_count"] >= 1
+    assert result.argument_graph.summary()["claim_count"] >= 1
 
     response = result.to_response()
     assert response["decision"] == "allow"
@@ -69,7 +72,7 @@ def test_telegram_policy_violation_maps_to_ban() -> None:
         },
     )
 
-    assert result.decision_object.state is DecisionState.EJECT
+    assert result.decision_object.state == DecisionState.EJECT.value
 
     action = adapter.build_response(result.to_response()["final"], tenant_id="default")
     assert action["action"] == "ban"

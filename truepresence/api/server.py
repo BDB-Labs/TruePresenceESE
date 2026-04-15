@@ -36,8 +36,8 @@ async def truepresence_exception_handler(request, exc: TruePresenceError):
         status_code=500,
         content={
             "error": exc.__class__.__name__,
-            "message": exc.message,
-            "details": exc.details
+            "message": "TruePresence request failed",
+            "details": {"error_type": exc.__class__.__name__},
         }
     )
 
@@ -50,7 +50,7 @@ async def general_exception_handler(request, exc: Exception):
         status_code=500,
         content={
             "error": "InternalServerError",
-            "message": f"Unexpected error: {str(exc)}",
+            "message": "An internal server error occurred.",
             "details": {"exception_type": type(exc).__name__}
         }
     )
@@ -178,9 +178,15 @@ def evaluate(request: EvaluateRequest):
             }
     
     result = shared_decision_engine.evaluate(
-        session_id=request.session_id,
         surface=request.context.get("platform", "web_guard") if request.context else "web_guard",
-        session={"session_id": request.session_id, "mode": request.mode, **(request.context or {})},
+        session_id=request.session_id,
+        tenant_id=(request.context or {}).get("tenant_id", "default"),
+        session={
+            "session_id": request.session_id,
+            "mode": request.mode,
+            "tenant_id": (request.context or {}).get("tenant_id", "default"),
+            **(request.context or {}),
+        },
         event=event_dict,
         challenge_results=[
             {
@@ -227,7 +233,10 @@ def health_check():
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}", exc_info=True)
-        return JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "error": "health_check_failed", "details": {"exception_type": type(e).__name__}},
+        )
 
 
 @app.get("/v1/sessions/{session_id}/cluster")
@@ -240,5 +249,5 @@ def get_session_cluster(session_id: str):
 @app.post("/v1/sessions/{session_id}/reset")
 def reset_session(session_id: str):
     """Reset session memory."""
-    shared_orchestrator.memory.clear()
+    shared_orchestrator.memory.clear(session_id)
     return {"session_id": session_id, "status": "reset"}

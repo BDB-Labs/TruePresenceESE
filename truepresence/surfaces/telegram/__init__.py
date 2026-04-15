@@ -1,3 +1,3 @@
-from .adapter import TelegramAdapter
+from .adapter import TelegramAdapter, TelegramGuardAdapter
 
-__all__ = ["TelegramAdapter"]
+__all__ = ["TelegramAdapter", "TelegramGuardAdapter"]
