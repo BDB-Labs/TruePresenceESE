@@ -1,71 +1,33 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field
-
-from truepresence.evidence.argument_graph import ArgumentGraph
-from truepresence.evidence.packet_builder import EvidencePacket
-
-from .decision_object import DecisionState
-from .reason_codes import ReasonCode
+from truepresence.decision.decision_object import DecisionState
+from truepresence.decision.tier_router import choose_tier
 
 
-def _score(value: Any) -> float:
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, list):
-        return 1.0 if value else 0.0
-    return 0.0
-
-
-class DecisionRoute(BaseModel):
-    state: DecisionState
+@dataclass
+class DecisionRoute:
+    state: str
     confidence: float
-    reason_codes: list[str] = Field(default_factory=list)
-    details: dict[str, Any] = Field(default_factory=dict)
+    reason_codes: List[str] = field(default_factory=list)
+    details: Dict[str, Any] = field(default_factory=dict)
+
+    def model_dump(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 class DecisionRouter:
-    """Tier-0 deterministic guardrails that can bypass the ensemble."""
+    """Compatibility shim over the canonical tier router."""
 
-    def route(self, packet: EvidencePacket, argument_graph: ArgumentGraph) -> DecisionRoute | None:
-        threat_analysis = packet.latest_event.get("threat_analysis", {})
-        threats = set(threat_analysis.get("threats_detected", []))
-        illegal_score = _score(packet.signals.get("illegal_indicators"))
-        if threats.intersection({"child_exploitation", "illegal_content"}) or illegal_score >= 0.8:
-            return DecisionRoute(
-                state=DecisionState.EJECT,
-                confidence=max(0.9, illegal_score),
-                reason_codes=[
-                    ReasonCode.DETERMINISTIC_POLICY_VIOLATION.value,
-                    ReasonCode.ILLEGAL_CONTENT.value,
-                ],
-                details={"threats_detected": sorted(threats)},
-            )
-
-        cross_session_risk = _score(packet.identity_refs.get("cluster_risk"))
-        relay_risk = _score(packet.signals.get("relay_risk"))
-        if cross_session_risk >= 0.85 and relay_risk >= 0.6:
-            return DecisionRoute(
-                state=DecisionState.STEP_UP_AUTH,
-                confidence=max(cross_session_risk, relay_risk),
-                reason_codes=[
-                    ReasonCode.CROSS_SESSION_RISK.value,
-                    ReasonCode.RELAY_RISK.value,
-                ],
-                details={"graph": argument_graph.summary()},
-            )
-
-        deterministic_violation = _score(packet.signals.get("deterministic_policy_violation"))
-        if deterministic_violation >= 1.0 and threats:
-            return DecisionRoute(
-                state=DecisionState.RESTRICT,
-                confidence=0.8,
-                reason_codes=[ReasonCode.DETERMINISTIC_POLICY_VIOLATION.value],
-                details={"threats_detected": sorted(threats)},
-            )
-
-        return None
+    def route(self, packet, argument_graph, context: Dict[str, Any] | None = None) -> DecisionRoute | None:
+        tier = choose_tier(packet, argument_graph, context or {})
+        if tier != "tier0":
+            return None
+        return DecisionRoute(
+            state=DecisionState.EJECT.value,
+            confidence=0.99,
+            reason_codes=[],
+            details={"tier": tier},
+        )

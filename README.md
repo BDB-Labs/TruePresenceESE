@@ -2,6 +2,17 @@
 
 ESE is a lightweight CLI framework for orchestrated AI ensembles. The core engine stays generic, while installed config packs can contribute fixed role catalogs from external repositories.
 
+## Product boundary
+
+TruePresence is the application product in this repository.
+ESE is the reusable ensemble orchestration substrate that TruePresence builds on.
+
+This repository currently contains both because TruePresence is being developed atop ESE.
+Product architecture, evidence contracts, decision logic, and enforcement flows belong to TruePresence.
+Generic orchestration, role execution infrastructure, model routing, and extension mechanics belong to ESE.
+
+Production auth requires `JWT_SECRET` to be set. A development fallback is only allowed when explicit development mode is enabled together with `TRUEPRESENCE_ALLOW_DEV_AUTH`.
+
 ## Core pipeline
 
 ```mermaid

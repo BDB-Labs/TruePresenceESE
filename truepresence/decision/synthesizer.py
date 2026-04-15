@@ -1,136 +1,191 @@
 from __future__ import annotations
 
-from typing import Any
+import uuid
+from typing import Any, Dict, List
 
-from truepresence.evidence.argument_graph import ArgumentGraph
-from truepresence.evidence.packet_builder import EvidencePacket
-
-from .decision_object import DecisionObject, DecisionState
-from .decision_router import DecisionRoute
-from .reason_codes import ReasonCode
+from truepresence.decision.decision_object import DecisionObject, DecisionState
+from truepresence.decision import reason_codes as rc
 
 
-def _score(value: Any) -> float:
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    if isinstance(value, (int, float)):
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
         return float(value)
-    if isinstance(value, list):
-        return 1.0 if value else 0.0
-    return 0.0
+    except (TypeError, ValueError):
+        return default
+
+
+def _average(values: List[float], default: float = 0.5) -> float:
+    if not values:
+        return default
+    return sum(values) / len(values)
+
+
+def _risk_rank(risk_level: str) -> int:
+    return {"low": 0, "medium": 1, "high": 2}.get(risk_level, 0)
+
+
+def _max_risk(left: str, right: str) -> str:
+    return left if _risk_rank(left) >= _risk_rank(right) else right
+
+
+def _explanation_for_state(state: str) -> str:
+    explanations = {
+        DecisionState.ALLOW.value: "Signals are coherent enough to allow the session.",
+        DecisionState.OBSERVE.value: "Signals are mixed; keep the session under observation.",
+        DecisionState.ELEVATED_OBSERVE.value: "Signals are mixed with elevated risk; continue with stronger observation.",
+        DecisionState.CHALLENGE.value: "The session should complete an active challenge before proceeding.",
+        DecisionState.STEP_UP_AUTH.value: "The session should be stepped up for stronger verification.",
+        DecisionState.RESTRICT.value: "Limit high-risk actions while the session is evaluated further.",
+        DecisionState.BLOCK.value: "The session should be blocked based on ensemble risk.",
+        DecisionState.EJECT.value: "Deterministic policy violations require immediate removal.",
+    }
+    return explanations.get(state, "")
+
+
+def synthesize_decision(*, packet, graph, role_reports, tier: str, context: dict) -> DecisionObject:
+    reason_codes: List[str] = []
+    state = DecisionState.ALLOW.value
+    enforcement = "allow"
+    confidence = 0.5
+    risk_level = "low"
+
+    human_probability = _average(
+        [_coerce_float(report.get("human_probability")) for report in (role_reports or []) if report.get("human_probability") is not None],
+        default=0.5,
+    )
+    role_confidence = _average(
+        [_coerce_float(report.get("confidence")) for report in (role_reports or []) if report.get("confidence") is not None],
+        default=0.5,
+    )
+    confidence = max(confidence, role_confidence)
+    bot_probability = max(0.0, min(1.0, 1.0 - human_probability))
+
+    if tier == "tier0":
+        risk_level = "high"
+        confidence = 0.99
+        human_probability = 0.01
+        bot_probability = 0.99
+        if packet.provenance.get("invalid_attestation"):
+            reason_codes.append(rc.INVALID_ATTESTATION)
+        if packet.behavioral_features.get("known_automation_fingerprint"):
+            reason_codes.append(rc.KNOWN_AUTOMATION_FINGERPRINT)
+        if packet.risk_context.get("impossible_event_sequence"):
+            reason_codes.append(rc.IMPOSSIBLE_EVENT_SEQUENCE)
+        if packet.challenge_data.get("status") == "deterministic_failure":
+            reason_codes.append(rc.CHALLENGE_FAILURE_DETERMINISTIC)
+
+        state = DecisionState.EJECT.value
+        enforcement = "eject"
+    else:
+        if packet.policy_context.get("require_step_up"):
+            reason_codes.append(rc.POLICY_REQUIRES_STEP_UP)
+            state = DecisionState.STEP_UP_AUTH.value
+            enforcement = "step_up_auth"
+            confidence = max(confidence, 0.75)
+            risk_level = _max_risk(risk_level, "medium")
+
+        if packet.identity_refs.get("cluster_risk") == "high":
+            if rc.CROSS_SESSION_CLUSTER_MATCH not in reason_codes:
+                reason_codes.append(rc.CROSS_SESSION_CLUSTER_MATCH)
+            if tier == "tier2":
+                state = DecisionState.CHALLENGE.value
+                enforcement = "challenge"
+                confidence = max(confidence, 0.80)
+                risk_level = _max_risk(risk_level, "high")
+
+        if packet.timing_features.get("constant_latency_pattern"):
+            if rc.TIMING_AUTOMATION_PATTERN not in reason_codes:
+                reason_codes.append(rc.TIMING_AUTOMATION_PATTERN)
+            if state == DecisionState.ALLOW.value:
+                state = DecisionState.CHALLENGE.value
+                enforcement = "challenge"
+                confidence = max(confidence, 0.70)
+                risk_level = _max_risk(risk_level, "medium")
+
+        if tier == "tier2" and packet.policy_context.get("high_value_flow"):
+            if rc.HIGH_VALUE_TRANSACTION_ESCALATION not in reason_codes:
+                reason_codes.append(rc.HIGH_VALUE_TRANSACTION_ESCALATION)
+            if state in {DecisionState.ALLOW.value, DecisionState.OBSERVE.value}:
+                state = DecisionState.STEP_UP_AUTH.value
+                enforcement = "step_up_auth"
+                confidence = max(confidence, 0.80)
+                risk_level = _max_risk(risk_level, "high")
+
+        disagreement = 0.0
+        for report in role_reports or []:
+            disagreement = max(disagreement, _coerce_float(report.get("metadata", {}).get("disagreement_score"), 0.0))
+
+        if disagreement > 0.8:
+            if rc.EXCESSIVE_ROLE_DISAGREEMENT not in reason_codes:
+                reason_codes.append(rc.EXCESSIVE_ROLE_DISAGREEMENT)
+            state = DecisionState.RESTRICT.value
+            enforcement = "restrict"
+            confidence = max(confidence, 0.65)
+            risk_level = _max_risk(risk_level, "medium")
+        elif disagreement > 0.5 and state == DecisionState.ALLOW.value:
+            state = DecisionState.ELEVATED_OBSERVE.value
+            enforcement = "observe"
+            confidence = max(confidence, 0.6)
+            risk_level = _max_risk(risk_level, "medium")
+
+        if human_probability <= 0.25 and confidence >= 0.75:
+            state = DecisionState.BLOCK.value
+            enforcement = "block"
+            risk_level = _max_risk(risk_level, "high")
+        elif human_probability <= 0.45 and state == DecisionState.ALLOW.value:
+            state = DecisionState.OBSERVE.value
+            enforcement = "observe"
+            risk_level = _max_risk(risk_level, "medium")
+
+    return DecisionObject(
+        decision_id=str(uuid.uuid4()),
+        session_id=packet.session_id,
+        tenant_id=packet.tenant_id,
+        surface=packet.surface,
+        state=state,
+        recommended_enforcement=enforcement,
+        confidence=confidence,
+        risk_level=risk_level,
+        reason_codes=list(dict.fromkeys(reason_codes)),
+        challenge_required=(state == DecisionState.CHALLENGE.value),
+        step_up_required=(state == DecisionState.STEP_UP_AUTH.value),
+        human_review_required=(state == DecisionState.RESTRICT.value and tier == "tier2"),
+        evidence_packet_id=packet.packet_id,
+        argument_graph_id=f"graph:{packet.packet_id}",
+        role_report_ids=[r.get("report_id") for r in (role_reports or []) if isinstance(r, dict) and r.get("report_id")],
+        decision_trace_id=f"trace:{packet.packet_id}",
+        tier_path=tier,
+        metadata={},
+        human_probability=human_probability,
+        bot_probability=bot_probability,
+        explanation=_explanation_for_state(state),
+    )
 
 
 class DecisionSynthesizer:
-    """Translate evidence, debate, and router output into a product decision."""
+    """Compatibility wrapper around the canonical V1 decision synthesizer."""
 
     def synthesize(
         self,
         *,
-        packet: EvidencePacket,
-        argument_graph: ArgumentGraph,
-        ensemble_result: dict[str, Any] | None,
-        route: DecisionRoute | None = None,
+        packet,
+        argument_graph,
+        ensemble_result: Dict[str, Any] | None = None,
+        route: Any | None = None,
+        role_reports: List[Dict[str, Any]] | None = None,
+        tier: str | None = None,
+        context: Dict[str, Any] | None = None,
     ) -> DecisionObject:
-        reason_codes = self._reason_codes(packet, argument_graph, ensemble_result, route)
-
-        if route is not None:
-            human_probability = 0.05 if route.state in {DecisionState.BLOCK, DecisionState.EJECT} else 0.3
-            return DecisionObject(
-                state=route.state,
-                confidence=route.confidence,
-                reason_codes=reason_codes,
-                human_probability=human_probability,
-                bot_probability=1.0 - human_probability,
-                explanation=self._explanation_for_state(route.state),
-                metadata={"router": route.model_dump()},
-            )
-
-        synthesis = ensemble_result or {}
-        state = self._map_state(synthesis, packet)
-        confidence = float(synthesis.get("confidence", 0.5))
-        human_probability = float(synthesis.get("human_probability", synthesis.get("combined_score", 0.5)))
-        bot_probability = float(synthesis.get("bot_probability", 1.0 - human_probability))
-
-        return DecisionObject(
-            state=state,
-            confidence=confidence,
-            reason_codes=reason_codes,
-            human_probability=human_probability,
-            bot_probability=bot_probability,
-            explanation=self._explanation_for_state(state),
-            metadata={
-                "ensemble_decision": synthesis.get("decision"),
-                "combined_score": synthesis.get("combined_score"),
-            },
+        reports = role_reports
+        if reports is None and ensemble_result and isinstance(ensemble_result.get("role_reports"), list):
+            reports = ensemble_result.get("role_reports", [])
+        if reports is None:
+            reports = []
+        resolved_tier = tier or ("tier0" if route is not None else "tier1")
+        return synthesize_decision(
+            packet=packet,
+            graph=argument_graph,
+            role_reports=reports,
+            tier=resolved_tier,
+            context=context or {},
         )
-
-    def _map_state(self, synthesis: dict[str, Any], packet: EvidencePacket) -> DecisionState:
-        decision = synthesis.get("decision", "review")
-        confidence = float(synthesis.get("confidence", 0.5))
-        threat_categories = synthesis.get("threat_categories", [])
-
-        if threat_categories and confidence >= 0.6:
-            return DecisionState.RESTRICT
-
-        if decision == "allow":
-            if confidence < 0.55:
-                return DecisionState.OBSERVE
-            return DecisionState.ALLOW
-        if decision == "challenge":
-            return DecisionState.CHALLENGE
-        if decision == "block":
-            return DecisionState.BLOCK
-
-        cross_session_risk = _score(packet.identity_refs.get("cluster_risk"))
-        if cross_session_risk >= 0.7:
-            return DecisionState.STEP_UP_AUTH
-        return DecisionState.OBSERVE
-
-    def _reason_codes(
-        self,
-        packet: EvidencePacket,
-        argument_graph: ArgumentGraph,
-        ensemble_result: dict[str, Any] | None,
-        route: DecisionRoute | None,
-    ) -> list[str]:
-        codes: list[str] = []
-        if packet.surface == "telegram":
-            codes.append(ReasonCode.SURFACE_TELEGRAM.value)
-        elif packet.surface == "web_guard":
-            codes.append(ReasonCode.SURFACE_WEB_GUARD.value)
-
-        if any(claim.type.value == "human_present" for claim in argument_graph.claims.values()):
-            if _score(packet.signals.get("liveness")) >= 0.55:
-                codes.append(ReasonCode.LIVENESS_CONFIRMED.value)
-        if any(result.get("verified") for result in packet.challenge_results):
-            codes.append(ReasonCode.VERIFIED_CHALLENGE.value)
-        if _score(packet.signals.get("ai_mediation")) >= 0.4:
-            codes.append(ReasonCode.AI_MEDIATION_RISK.value)
-        if _score(packet.signals.get("relay_risk")) >= 0.4:
-            codes.append(ReasonCode.RELAY_RISK.value)
-        if _score(packet.metadata.get("temporal_drift")) >= 0.2:
-            codes.append(ReasonCode.TEMPORAL_DRIFT.value)
-        if _score(packet.identity_refs.get("cluster_risk")) >= 0.4:
-            codes.append(ReasonCode.CROSS_SESSION_RISK.value)
-        if route is not None:
-            codes.extend(code for code in route.reason_codes if code not in codes)
-        if ensemble_result:
-            disagreement = float(ensemble_result.get("disagreement", 0.0))
-            if disagreement >= 0.3:
-                codes.append(ReasonCode.REVIEW_DISAGREEMENT.value)
-            if float(ensemble_result.get("confidence", 0.5)) < 0.55:
-                codes.append(ReasonCode.LOW_CONFIDENCE.value)
-
-        return list(dict.fromkeys(codes))
-
-    def _explanation_for_state(self, state: DecisionState) -> str:
-        explanations = {
-            DecisionState.ALLOW: "Signals are coherent enough to allow the session.",
-            DecisionState.OBSERVE: "Signals are mixed; allow the session but keep it under observation.",
-            DecisionState.CHALLENGE: "The session should complete an active challenge before proceeding.",
-            DecisionState.STEP_UP_AUTH: "The session should be stepped up for stronger verification.",
-            DecisionState.RESTRICT: "Limit high-risk actions while the session is evaluated further.",
-            DecisionState.BLOCK: "The session should be blocked based on ensemble risk.",
-            DecisionState.EJECT: "Deterministic policy violations require immediate removal.",
-        }
-        return explanations[state]

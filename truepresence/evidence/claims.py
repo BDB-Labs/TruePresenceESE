@@ -1,25 +1,32 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any
-
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
 
 
 class ClaimType(str, Enum):
-    HUMAN_PRESENT = "human_present"
-    VERIFIED_CHALLENGE = "verified_challenge"
-    AI_MEDIATED = "ai_mediated"
-    RELAY_RISK = "relay_risk"
-    TEMPORAL_DRIFT = "temporal_drift"
-    CROSS_SESSION_RISK = "cross_session_risk"
-    POLICY_VIOLATION = "policy_violation"
+    PRESENCE = "presence"
+    RISK = "risk"
+    CHALLENGE = "challenge"
+    IDENTITY = "identity"
+    POLICY = "policy"
 
 
-class Claim(BaseModel):
+@dataclass
+class Claim:
     claim_id: str
-    type: ClaimType
-    evidence_refs: list[str] = Field(default_factory=list)
-    confidence: float = 0.5
-    detail: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    claim_type: str
+    label: str
+    evidence_refs: List[str] = field(default_factory=list)
+    confidence_hint: Optional[float] = None
+    created_at: Optional[str] = None
+    valid_window: Optional[Dict[str, str]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def type(self) -> str:
+        return self.claim_type
+
+    def model_dump(self) -> Dict[str, Any]:
+        return asdict(self)

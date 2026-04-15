@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any
-
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
 
 
 class DecisionState(str, Enum):
     ALLOW = "ALLOW"
     OBSERVE = "OBSERVE"
+    ELEVATED_OBSERVE = "ELEVATED_OBSERVE"
     CHALLENGE = "CHALLENGE"
     STEP_UP_AUTH = "STEP_UP_AUTH"
     RESTRICT = "RESTRICT"
@@ -16,20 +16,29 @@ class DecisionState(str, Enum):
     EJECT = "EJECT"
 
 
-class DecisionObject(BaseModel):
-    state: DecisionState
+@dataclass
+class DecisionObject:
+    decision_id: str
+    session_id: str
+    tenant_id: str
+    surface: str
+    state: str
+    recommended_enforcement: str
     confidence: float
-    reason_codes: list[str] = Field(default_factory=list)
+    risk_level: str
+    reason_codes: List[str] = field(default_factory=list)
+    challenge_required: bool = False
+    step_up_required: bool = False
+    human_review_required: bool = False
+    evidence_packet_id: Optional[str] = None
+    argument_graph_id: Optional[str] = None
+    role_report_ids: List[str] = field(default_factory=list)
+    decision_trace_id: Optional[str] = None
+    tier_path: str = "tier1"
+    metadata: Dict[str, Any] = field(default_factory=dict)
     human_probability: float = 0.5
     bot_probability: float = 0.5
     explanation: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
-
-class DecisionArtifact(BaseModel):
-    evidence_summary: dict[str, Any] = Field(default_factory=dict)
-    argument_graph: dict[str, Any] = Field(default_factory=dict)
-    router: dict[str, Any] = Field(default_factory=dict)
-    role_outputs: dict[str, Any] = Field(default_factory=dict)
-    reasoning_trace: dict[str, str] = Field(default_factory=dict)
-    synthesis: dict[str, Any] = Field(default_factory=dict)
+    def model_dump(self) -> Dict[str, Any]:
+        return asdict(self)

@@ -1,201 +1,232 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
-
-from truepresence.ensemble.orchestrator import TruePresenceEnsembleOrchestrator
-from truepresence.evidence import (
-    ArgumentGraph,
-    ArgumentGraphBuilder,
-    EvidencePacket,
-    EvidencePacketBuilder,
-)
-
-from .decision_object import DecisionArtifact, DecisionObject, DecisionState
-from .decision_router import DecisionRouter
-from .synthesizer import DecisionSynthesizer
+from truepresence.artifacts.artifact_store import ArtifactStore
+from truepresence.decision.decision_object import DecisionObject, DecisionState
+from truepresence.decision.synthesizer import synthesize_decision
+from truepresence.decision.tier_router import choose_tier
+from truepresence.evidence.argument_graph import ArgumentGraph, build_argument_graph
+from truepresence.evidence.packet import EvidencePacket
+from truepresence.evidence.packet_builder import build_evidence_packet
+from truepresence.memory.session_timeline import SessionTimeline
 
 
-def _legacy_decision_for_state(state: DecisionState) -> str:
+def _legacy_decision_for_state(state: str) -> str:
     mapping = {
-        DecisionState.ALLOW: "allow",
-        DecisionState.OBSERVE: "allow",
-        DecisionState.CHALLENGE: "challenge",
-        DecisionState.STEP_UP_AUTH: "challenge",
-        DecisionState.RESTRICT: "review",
-        DecisionState.BLOCK: "block",
-        DecisionState.EJECT: "block",
+        DecisionState.ALLOW.value: "allow",
+        DecisionState.OBSERVE.value: "allow",
+        DecisionState.ELEVATED_OBSERVE.value: "review",
+        DecisionState.CHALLENGE.value: "challenge",
+        DecisionState.STEP_UP_AUTH.value: "challenge",
+        DecisionState.RESTRICT.value: "review",
+        DecisionState.BLOCK.value: "block",
+        DecisionState.EJECT.value: "block",
     }
-    return mapping[state]
+    return mapping.get(state, "review")
 
 
-class DecisionEngineResult(BaseModel):
-    session_id: str
-    surface: str
-    decision_object: DecisionObject
+@dataclass
+class DecisionResult:
+    decision: DecisionObject
     evidence_packet: EvidencePacket
-    decision_artifact: DecisionArtifact
     argument_graph: ArgumentGraph
-    ensemble_result: dict[str, Any] = Field(default_factory=dict)
+    decision_artifact: Dict[str, Any]
 
-    def to_response(self) -> dict[str, Any]:
-        decision = self.decision_object
-        evidence_summary = dict(self.decision_artifact.evidence_summary)
+    @property
+    def decision_object(self) -> DecisionObject:
+        return self.decision
+
+    def model_dump(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    def to_response(self) -> Dict[str, Any]:
+        decision = self.decision
         final = {
-            "state": decision.state.value,
+            "state": decision.state,
             "decision": _legacy_decision_for_state(decision.state),
             "confidence": decision.confidence,
             "human_probability": decision.human_probability,
             "bot_probability": decision.bot_probability,
             "reason_codes": list(decision.reason_codes),
-            "threat_categories": evidence_summary.get("threat_categories", []),
-            "block_reason": evidence_summary.get("block_reason", ""),
-            "risk_factors": evidence_summary.get("risk_factors", []),
+            "risk_factors": list(decision.reason_codes),
+            "threat_categories": self.decision_artifact.get("threat_categories", []),
+            "block_reason": self.decision_artifact.get("block_reason", ""),
         }
         return {
-            "session_id": self.session_id,
-            "surface": self.surface,
-            "state": decision.state.value,
+            "session_id": decision.session_id,
+            "surface": decision.surface,
+            "state": decision.state,
             "decision": final["decision"],
             "human_probability": decision.human_probability,
             "bot_probability": decision.bot_probability,
             "confidence": decision.confidence,
-            "risk_factors": evidence_summary.get("risk_factors", []),
+            "risk_factors": list(decision.reason_codes),
             "reason_codes": list(decision.reason_codes),
-            "reasoning_trace": dict(self.decision_artifact.reasoning_trace),
-            "temporal_signals": evidence_summary.get("temporal_signals", {}),
-            "roles": dict(self.decision_artifact.role_outputs),
+            "reasoning_trace": dict(self.decision_artifact.get("reasoning_trace", {})),
+            "temporal_signals": {
+                "drift": self.evidence_packet.timing_features.get("temporal_drift", 0.0),
+                "cross_session_risk": self.evidence_packet.identity_refs.get("cluster_risk", 0.0),
+            },
+            "roles": {
+                report["role"]: {
+                    "summary": report.get("summary"),
+                    "confidence": report.get("confidence"),
+                    "findings": report.get("findings", []),
+                    "metadata": report.get("metadata", {}),
+                }
+                for report in self.decision_artifact.get("role_reports", [])
+            },
             "final": final,
-            "synthesis": dict(self.ensemble_result),
             "decision_object": decision.model_dump(),
             "evidence_packet": self.evidence_packet.model_dump(),
-            "decision_artifact": self.decision_artifact.model_dump(),
+            "decision_artifact": dict(self.decision_artifact),
             "argument_graph": self.argument_graph.model_dump(),
         }
 
 
-class TruePresenceDecisionEngine:
-    """Product-level contract: surfaces hand events to this engine."""
+class _NoOpIdentityGraph:
+    def get_connected_sessions(self, session_id: str):
+        return set()
 
-    def __init__(
-        self,
-        *,
-        orchestrator: TruePresenceEnsembleOrchestrator | None = None,
-        packet_builder: EvidencePacketBuilder | None = None,
-        graph_builder: ArgumentGraphBuilder | None = None,
-        router: DecisionRouter | None = None,
-        synthesizer: DecisionSynthesizer | None = None,
-    ) -> None:
-        self.orchestrator = orchestrator or TruePresenceEnsembleOrchestrator()
-        self.packet_builder = packet_builder or EvidencePacketBuilder()
-        self.graph_builder = graph_builder or ArgumentGraphBuilder()
-        self.router = router or DecisionRouter()
-        self.synthesizer = synthesizer or DecisionSynthesizer()
+    def get_session_risk(self, session_id: str) -> float:
+        return 0.0
+
+    def get_session_cluster(self, session_id: str):
+        return set()
+
+
+class _NoOpEnsembleRuntime:
+    def __init__(self) -> None:
+        self.memory = SessionTimeline()
+        self.identity_graph = _NoOpIdentityGraph()
+
+    def run(self, **kwargs):
+        return []
+
+    def get_session_cluster(self, session_id: str):
+        return set()
+
+
+class TruePresenceDecisionEngine:
+    def __init__(self, ensemble_runtime=None, artifact_store: Optional[ArtifactStore] = None):
+        if ensemble_runtime is None:
+            try:
+                from truepresence.ensemble.orchestrator import TruePresenceEnsembleRuntime
+            except Exception:
+                ensemble_runtime = _NoOpEnsembleRuntime()
+            else:
+                try:
+                    ensemble_runtime = TruePresenceEnsembleRuntime()
+                except Exception:
+                    ensemble_runtime = _NoOpEnsembleRuntime()
+        self.ensemble_runtime = ensemble_runtime
+        self.artifact_store = artifact_store or ArtifactStore()
 
     def evaluate(
         self,
-        *,
-        session_id: str,
         surface: str,
-        event: dict[str, Any],
-        session: dict[str, Any] | None = None,
-        challenge_results: list[dict[str, Any]] | None = None,
+        session_id: str,
         tenant_id: str | None = None,
-    ) -> DecisionEngineResult:
-        identity_refs: dict[str, Any] = {}
-        if hasattr(self.orchestrator, "identity_graph"):
-            connected = self.orchestrator.identity_graph.get_connected_sessions(session_id)
-            identity_refs["connected_sessions"] = len(connected)
-            if connected:
-                identity_refs["cluster_risk"] = self.orchestrator.identity_graph.get_session_risk(session_id)
-
-        packet = self.packet_builder.build(
-            session_id=session_id,
-            surface=surface,
-            event=event,
-            session=session,
-            challenge_results=challenge_results,
-            session_history=list(self.orchestrator.memory.window(50)),
-            identity_refs=identity_refs,
-            tenant_id=tenant_id,
-        )
-        argument_graph = self.graph_builder.build(packet)
-        route = self.router.route(packet, argument_graph)
-
-        ensemble_result: dict[str, Any] = {}
-        if route is None:
-            ensemble_result = self.orchestrator.run(packet, argument_graph, session=session or {})
-            packet = EvidencePacket(**ensemble_result.get("evidence_packet", packet.model_dump()))
-            argument_graph = ArgumentGraph(**ensemble_result.get("argument_graph", argument_graph.model_dump()))
-
-        decision_object = self.synthesizer.synthesize(
-            packet=packet,
-            argument_graph=argument_graph,
-            ensemble_result=ensemble_result,
-            route=route,
-        )
-        decision_artifact = self._build_artifact(
-            packet=packet,
-            argument_graph=argument_graph,
-            decision_object=decision_object,
-            route=route,
-            ensemble_result=ensemble_result,
-        )
-        return DecisionEngineResult(
-            session_id=session_id,
-            surface=surface,
-            decision_object=decision_object,
-            evidence_packet=packet,
-            decision_artifact=decision_artifact,
-            argument_graph=argument_graph,
-            ensemble_result=ensemble_result,
-        )
-
-    def _build_artifact(
-        self,
+        event: Dict[str, Any] | None = None,
+        context: Optional[Dict[str, Any]] = None,
         *,
-        packet: EvidencePacket,
-        argument_graph: ArgumentGraph,
-        decision_object: DecisionObject,
-        route: Any,
-        ensemble_result: dict[str, Any],
-    ) -> DecisionArtifact:
-        roles = dict(ensemble_result.get("roles", {}))
-        threat_categories = roles.get("adversarial", {}).get("threat_categories", [])
-        block_reason = roles.get("adversarial", {}).get("block_reason", "")
-        if route is not None and route.details.get("threats_detected"):
-            threat_categories = route.details["threats_detected"]
-            block_reason = block_reason or "Deterministic policy violation"
-        elif decision_object.state not in {DecisionState.RESTRICT, DecisionState.BLOCK, DecisionState.EJECT}:
-            block_reason = ""
+        session: Optional[Dict[str, Any]] = None,
+        challenge_results: Optional[list[Dict[str, Any]]] = None,
+    ) -> DecisionResult:
+        if event is None:
+            raise ValueError("event is required")
 
-        risk_factors = list(ensemble_result.get("risk_factors", []))
-        risk_factors.extend(decision_object.reason_codes)
-        risk_factors = list(dict.fromkeys(risk_factors))
+        ctx = dict(context or {})
+        session_dict = dict(session or {})
+        if session_dict:
+            ctx.setdefault("session", session_dict)
+            ctx.setdefault("actor_id", session_dict.get("actor_id") or session_dict.get("user_id"))
 
-        temporal_signals = {
-            "drift": float(packet.metadata.get("temporal_drift", 0.0)),
-            "cross_session_risk": float(packet.identity_refs.get("cluster_risk", 0.0)),
+        resolved_tenant_id = tenant_id or session_dict.get("tenant_id") or ctx.get("tenant_id") or "default"
+
+        if challenge_results and "challenge_data" not in ctx:
+            latest = dict(challenge_results[-1])
+            if latest.get("verified") is True:
+                latest.setdefault("status", "passed")
+            elif latest.get("verified") is False:
+                latest.setdefault("status", "failed")
+            ctx["challenge_data"] = latest
+
+        if "session_history" not in ctx and hasattr(self.ensemble_runtime, "memory"):
+            ctx["session_history"] = self.ensemble_runtime.memory.window(session_id, 50)
+
+        if "identity_refs" not in ctx and getattr(self.ensemble_runtime, "identity_graph", None) is not None:
+            connected = self.ensemble_runtime.identity_graph.get_connected_sessions(session_id)
+            identity_refs = {
+                "connected_sessions": len(connected),
+            }
+            if connected:
+                cluster_risk = self.ensemble_runtime.identity_graph.get_session_risk(session_id)
+                identity_refs["cluster_risk"] = "high" if cluster_risk >= 0.75 else cluster_risk
+            ctx["identity_refs"] = identity_refs
+
+        packet = build_evidence_packet(
+            surface=surface,
+            session_id=session_id,
+            tenant_id=resolved_tenant_id,
+            event=dict(event),
+            context=ctx,
+        )
+        graph = build_argument_graph(packet)
+        tier = choose_tier(packet, graph, ctx)
+
+        role_reports = []
+        if tier != "tier0":
+            role_reports = self.ensemble_runtime.run(
+                evidence_packet=packet,
+                argument_graph=graph,
+                context=ctx,
+                tier=tier,
+            )
+
+        decision = synthesize_decision(
+            packet=packet,
+            graph=graph,
+            role_reports=role_reports,
+            tier=tier,
+            context=ctx,
+        )
+
+        artifact = {
+            "decision_id": decision.decision_id,
+            "session_id": decision.session_id,
+            "tenant_id": decision.tenant_id,
+            "surface": decision.surface,
+            "tier_path": decision.tier_path,
+            "reason_codes": decision.reason_codes,
+            "state": decision.state,
+            "recommended_enforcement": decision.recommended_enforcement,
+            "confidence": decision.confidence,
+            "risk_level": decision.risk_level,
+            "evidence_packet_id": packet.packet_id,
+            "argument_graph_id": decision.argument_graph_id,
+            "role_report_ids": decision.role_report_ids,
+            "role_reports": role_reports,
+            "reasoning_trace": {
+                "tier": tier,
+                "state": decision.state,
+                "reason_codes": list(decision.reason_codes),
+            },
+            "threat_categories": packet.risk_context.get("threats_detected", []),
+            "block_reason": "Deterministic policy violation" if tier == "tier0" else "",
+            "metadata": decision.metadata,
         }
 
-        return DecisionArtifact(
-            evidence_summary={
-                "session_id": packet.session_id,
-                "surface": packet.surface,
-                "event_count": len(packet.events),
-                "risk_factors": risk_factors,
-                "temporal_signals": temporal_signals,
-                "threat_categories": threat_categories,
-                "block_reason": block_reason,
-            },
-            argument_graph=argument_graph.summary(),
-            router=route.model_dump() if route is not None else {},
-            role_outputs=roles,
-            reasoning_trace=dict(ensemble_result.get("reasoning_trace", {})),
-            synthesis={
-                **ensemble_result,
-                "decision_state": decision_object.state.value,
-                "legacy_decision": _legacy_decision_for_state(decision_object.state),
-            },
+        self.artifact_store.store_evidence_packet(packet)
+        self.artifact_store.store_argument_graph(graph)
+        self.artifact_store.store_role_reports(role_reports)
+        self.artifact_store.store_decision_artifact(artifact)
+
+        return DecisionResult(
+            decision=decision,
+            evidence_packet=packet,
+            argument_graph=graph,
+            decision_artifact=artifact,
         )

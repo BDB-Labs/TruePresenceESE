@@ -1,144 +1,136 @@
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic import BaseModel, Field
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Tuple
 
 from .claims import Claim, ClaimType
-from .packet_builder import EvidencePacket
+from .packet import EvidencePacket
 
 
-def _score(value: Any) -> float:
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, list):
-        return 1.0 if value else 0.0
-    return 0.0
-
-
-class ArgumentGraph(BaseModel):
-    claims: dict[str, Claim] = Field(default_factory=dict)
-    support_edges: list[tuple[str, str]] = Field(default_factory=list)
-    attack_edges: list[tuple[str, str]] = Field(default_factory=list)
+@dataclass
+class ArgumentGraph:
+    claims: Dict[str, Claim] = field(default_factory=dict)
+    support_edges: List[Tuple[str, str]] = field(default_factory=list)
+    attack_edges: List[Tuple[str, str]] = field(default_factory=list)
 
     def add_claim(self, claim: Claim) -> None:
         self.claims[claim.claim_id] = claim
 
-    def supports(self, source: str, target: str) -> None:
-        self.support_edges.append((source, target))
+    def supports(self, source_claim_id: str, target_claim_id: str) -> None:
+        self.support_edges.append((source_claim_id, target_claim_id))
 
-    def attacks(self, source: str, target: str) -> None:
-        self.attack_edges.append((source, target))
+    def attacks(self, source_claim_id: str, target_claim_id: str) -> None:
+        self.attack_edges.append((source_claim_id, target_claim_id))
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> Dict[str, Any]:
         return {
             "claim_count": len(self.claims),
             "support_edges": list(self.support_edges),
             "attack_edges": list(self.attack_edges),
             "claims": {
                 claim_id: {
-                    "type": claim.type.value,
-                    "confidence": claim.confidence,
-                    "detail": claim.detail,
+                    "claim_type": claim.claim_type,
+                    "label": claim.label,
+                    "evidence_refs": list(claim.evidence_refs),
+                    "confidence_hint": claim.confidence_hint,
                 }
                 for claim_id, claim in self.claims.items()
             },
         }
 
+    def model_dump(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def build_argument_graph(packet: EvidencePacket) -> ArgumentGraph:
+    """
+    Build an initial temporal argument graph from an EvidencePacket.
+
+    V1 goals:
+    - minimal but canonical
+    - deterministic
+    - extensible
+    """
+    graph = ArgumentGraph()
+
+    graph.add_claim(
+        Claim(
+            claim_id="human_presence_supported",
+            claim_type=ClaimType.PRESENCE.value,
+            label="Actor appears to be a legitimate human participant",
+            evidence_refs=[],
+        )
+    )
+    graph.add_claim(
+        Claim(
+            claim_id="automation_pattern_supported",
+            claim_type=ClaimType.RISK.value,
+            label="Observed patterns support automation or non-human behavior",
+            evidence_refs=[],
+        )
+    )
+    graph.add_claim(
+        Claim(
+            claim_id="challenge_success_supported",
+            claim_type=ClaimType.CHALLENGE.value,
+            label="Challenge result supports human continuity",
+            evidence_refs=[],
+        )
+    )
+    graph.add_claim(
+        Claim(
+            claim_id="challenge_failure_supported",
+            claim_type=ClaimType.CHALLENGE.value,
+            label="Challenge result undermines human continuity",
+            evidence_refs=[],
+        )
+    )
+    graph.add_claim(
+        Claim(
+            claim_id="identity_cluster_risk_supported",
+            claim_type=ClaimType.IDENTITY.value,
+            label="Cross-session identity graph indicates elevated cluster risk",
+            evidence_refs=[],
+        )
+    )
+    graph.add_claim(
+        Claim(
+            claim_id="policy_step_up_required",
+            claim_type=ClaimType.POLICY.value,
+            label="Tenant or flow policy requires step-up verification",
+            evidence_refs=[],
+        )
+    )
+
+    graph.supports("challenge_success_supported", "human_presence_supported")
+    graph.attacks("challenge_failure_supported", "human_presence_supported")
+    graph.attacks("automation_pattern_supported", "human_presence_supported")
+    graph.supports("identity_cluster_risk_supported", "automation_pattern_supported")
+    graph.attacks("policy_step_up_required", "human_presence_supported")
+
+    status = packet.challenge_data.get("status")
+    if status == "passed":
+        graph.claims["challenge_success_supported"].evidence_refs.append("challenge_data")
+    elif status in {"failed", "deterministic_failure"}:
+        graph.claims["challenge_failure_supported"].evidence_refs.append("challenge_data")
+
+    if packet.identity_refs.get("cluster_risk"):
+        graph.claims["identity_cluster_risk_supported"].evidence_refs.append("identity_refs")
+
+    if packet.policy_context.get("require_step_up"):
+        graph.claims["policy_step_up_required"].evidence_refs.append("policy_context")
+
+    evidence_refs = []
+    if packet.timing_features.get("constant_latency_pattern"):
+        evidence_refs.append("timing_features")
+    if packet.behavioral_features.get("automation_pattern"):
+        evidence_refs.append("behavioral_features")
+    if evidence_refs:
+        graph.claims["automation_pattern_supported"].evidence_refs.extend(evidence_refs)
+
+    return graph
+
 
 class ArgumentGraphBuilder:
-    """Builds a lightweight argument graph from the evidence packet."""
-
     def build(self, packet: EvidencePacket) -> ArgumentGraph:
-        graph = ArgumentGraph()
-        human_claim = Claim(
-            claim_id="human_present",
-            type=ClaimType.HUMAN_PRESENT,
-            evidence_refs=["signals:liveness"],
-            confidence=_score(packet.signals.get("liveness", 0.5)),
-            detail="Direct interaction signals support a human-present hypothesis.",
-        )
-        graph.add_claim(human_claim)
-
-        if _score(packet.signals.get("liveness")) >= 0.55:
-            claim = Claim(
-                claim_id="liveness_signal",
-                type=ClaimType.HUMAN_PRESENT,
-                evidence_refs=["signals:liveness"],
-                confidence=_score(packet.signals.get("liveness")),
-                detail="Input timing or interaction cadence looks human.",
-            )
-            graph.add_claim(claim)
-            graph.supports(claim.claim_id, human_claim.claim_id)
-
-        if _score(packet.signals.get("ai_mediation")) >= 0.4:
-            claim = Claim(
-                claim_id="ai_mediation_risk",
-                type=ClaimType.AI_MEDIATED,
-                evidence_refs=["signals:ai_mediation"],
-                confidence=_score(packet.signals.get("ai_mediation")),
-                detail="Signals suggest AI-mediated content generation.",
-            )
-            graph.add_claim(claim)
-            graph.attacks(claim.claim_id, human_claim.claim_id)
-
-        if _score(packet.signals.get("relay_risk")) >= 0.4:
-            claim = Claim(
-                claim_id="relay_risk",
-                type=ClaimType.RELAY_RISK,
-                evidence_refs=["signals:relay_risk"],
-                confidence=_score(packet.signals.get("relay_risk")),
-                detail="Response timing suggests an automated relay or operator.",
-            )
-            graph.add_claim(claim)
-            graph.attacks(claim.claim_id, human_claim.claim_id)
-
-        temporal_drift = _score(packet.metadata.get("temporal_drift"))
-        if temporal_drift >= 0.2:
-            claim = Claim(
-                claim_id="temporal_drift",
-                type=ClaimType.TEMPORAL_DRIFT,
-                evidence_refs=["metadata:temporal_drift"],
-                confidence=temporal_drift,
-                detail="Recent events show unstable behavior over time.",
-            )
-            graph.add_claim(claim)
-            graph.attacks(claim.claim_id, human_claim.claim_id)
-
-        cross_session_risk = _score(packet.identity_refs.get("cluster_risk"))
-        if cross_session_risk >= 0.4:
-            claim = Claim(
-                claim_id="cross_session_risk",
-                type=ClaimType.CROSS_SESSION_RISK,
-                evidence_refs=["identity_refs:cluster_risk"],
-                confidence=cross_session_risk,
-                detail="Identity graph indicates related high-risk sessions.",
-            )
-            graph.add_claim(claim)
-            graph.attacks(claim.claim_id, human_claim.claim_id)
-
-        if any(result.get("verified") for result in packet.challenge_results):
-            claim = Claim(
-                claim_id="verified_challenge",
-                type=ClaimType.VERIFIED_CHALLENGE,
-                evidence_refs=["challenge_results"],
-                confidence=0.85,
-                detail="User passed an active challenge.",
-            )
-            graph.add_claim(claim)
-            graph.supports(claim.claim_id, human_claim.claim_id)
-
-        if packet.signals.get("deterministic_policy_violation"):
-            claim = Claim(
-                claim_id="policy_violation",
-                type=ClaimType.POLICY_VIOLATION,
-                evidence_refs=["signals:deterministic_policy_violation"],
-                confidence=1.0,
-                detail="Surface policy found a deterministic violation.",
-            )
-            graph.add_claim(claim)
-            graph.attacks(claim.claim_id, human_claim.claim_id)
-
-        return graph
+        return build_argument_graph(packet)

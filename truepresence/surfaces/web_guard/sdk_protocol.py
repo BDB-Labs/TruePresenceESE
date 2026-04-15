@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 
 class WebGuardEvent(BaseModel):
+    """Browser SDK event payload. The client sends telemetry; the server decides."""
+
     session_id: str
     event_type: str
     timestamp: float
@@ -15,6 +17,8 @@ class WebGuardEvent(BaseModel):
 
 
 class WebGuardDecisionEnvelope(BaseModel):
+    """Authoritative server decision returned to the Web Guard surface."""
+
     state: str
     legacy_decision: str
     confidence: float
