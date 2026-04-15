@@ -10,6 +10,8 @@ import yaml
 import os
 from typing import List, Dict, Any, Optional
 
+from truepresence.challenges.deterministic import stable_challenge_id, stable_index
+
 
 class ChallengeProfile:
     """
@@ -92,13 +94,13 @@ class ChallengeProfile:
             
         # Select question based on session_id for consistency
         if session_id:
-            index = hash(session_id) % len(self.questions)
+            index = stable_index(session_id, len(self.questions))
         else:
             import random
             index = random.randint(0, len(self.questions) - 1)
             
         return {
-            "id": f"challenge_{hash(str(index) + str(session_id)) % 10000}",
+            "id": stable_challenge_id(session_id or "anonymous", index),
             "prompt": self.questions[index],
             "type": "memory_verification"
         }

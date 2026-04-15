@@ -92,11 +92,11 @@ class TruePresenceOrchestrator:
             evidence = {
                 "session": dict(session),
                 "event": dict(event),
-                "historical": list(self.memory.window(50))
+                "historical": list(self.memory.window(session.get("session_id", "default"), 50))
             }
             
             # Add temporal drift information
-            temporal_drift = self.memory.drift()
+            temporal_drift = self.memory.drift(session.get("session_id", "default"))
             evidence["temporal_drift"] = temporal_drift
             
             return evidence
@@ -122,7 +122,7 @@ class TruePresenceOrchestrator:
             OrchestratorError: If evaluation fails at any step
         """
         # Add event to memory
-        self.memory.add(event)
+        self.memory.add(session.get("session_id", "default"), event)
         
         # Build evidence
         evidence = self.build_evidence(session, event)

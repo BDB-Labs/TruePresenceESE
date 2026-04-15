@@ -10,6 +10,8 @@ import numpy as np
 from typing import Dict, Any, List, Set, Optional
 from collections import defaultdict
 import hashlib
+import hmac
+import os
 
 
 class IdentityGraph:
@@ -33,8 +35,12 @@ class IdentityGraph:
         self.session_features = {}  # session_id -> feature_vector
         
     def _hash_session_id(self, session_id: str) -> str:
-        """Create consistent hash for session ID."""
-        return hashlib.md5(session_id.encode()).hexdigest()
+        """Create a stable pseudonymous hash for a session ID."""
+        secret = os.environ.get("TRUEPRESENCE_IDENTITY_HASH_SECRET") or os.environ.get("JWT_SECRET")
+        data = session_id.encode()
+        if secret:
+            return hmac.new(secret.encode(), data, hashlib.sha256).hexdigest()
+        return hashlib.sha256(data).hexdigest()
         
     def _extract_features(self, session: Dict[str, Any]) -> List[float]:
         """
@@ -227,7 +233,7 @@ class IdentityGraph:
             return 0.5
             
         # Get cluster of connected sessions
-        cluster = self.get_session_cluster(hashed_id)
+        cluster = self.get_session_cluster(session_id)
         
         if not cluster:
             return 0.5

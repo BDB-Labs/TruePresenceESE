@@ -7,8 +7,6 @@ DATABASE_URL is injected automatically by Railway when Postgres is added.
 
 import os
 import logging
-import psycopg2
-from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
@@ -46,6 +44,9 @@ DATABASE_URL = _build_database_url() if any(
 
 def get_connection():
     """Get a raw psycopg2 connection."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
     url = _build_database_url()
     return psycopg2.connect(url, cursor_factory=RealDictCursor)
 

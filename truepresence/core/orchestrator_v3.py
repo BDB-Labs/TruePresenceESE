@@ -114,11 +114,11 @@ class TruePresenceOrchestratorV3:
             surface=event.get("context", {}).get("platform", "unknown"),
             event=event,
             session=session,
-            session_history=list(self.memory.window(50)),
+            session_history=list(self.memory.window(session_id, 50)),
             tenant_id=session.get("tenant_id"),
         )
 
-        temporal_drift = self.memory.drift()
+        temporal_drift = self.memory.drift(session_id)
         packet.metadata["temporal_drift"] = temporal_drift
 
         if session_id:
@@ -129,7 +129,7 @@ class TruePresenceOrchestratorV3:
 
         graph = argument_graph or self.argument_graph_builder.build(packet)
         evidence = packet.as_role_evidence(graph)
-        evidence["historical"] = list(self.memory.window(50))
+        evidence["historical"] = list(self.memory.window(session_id, 50))
         evidence["temporal_drift"] = temporal_drift
         evidence["cross_session_connections"] = packet.identity_refs.get("connected_sessions", 0)
         evidence["cluster_risk"] = packet.identity_refs.get("cluster_risk", 0.0)
@@ -207,7 +207,7 @@ class TruePresenceOrchestratorV3:
         evidence_packet: EvidencePacket | None = None,
         argument_graph=None,
     ) -> Dict[str, Any]:
-        self.memory.add_event(event)
+        self.memory.add_event(session_id, event)
 
         evidence, packet, graph = self.build_evidence(
             session,
