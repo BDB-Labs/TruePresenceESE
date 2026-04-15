@@ -18,10 +18,11 @@ from truepresence.evidence import (
     EvidencePacket,
     EvidencePacketBuilder,
 )
-from truepresence.exceptions import OrchestratorError, wrap_role_error
+from truepresence.exceptions import ConfigurationError, OrchestratorError, wrap_role_error
 from truepresence.memory.identity_graph import IdentityGraph
 from truepresence.memory.session_timeline import SessionTimeline
 from truepresence.runtime.distributed import DistributedRuntime
+from truepresence.runtime.wiring import allow_lenient_wiring
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +61,17 @@ class TruePresenceOrchestratorV3:
         if redis_url:
             try:
                 self.distributed = DistributedRuntime(redis_url=redis_url)
+                if not self.distributed.available:
+                    raise ConfigurationError(
+                        message="Distributed runtime is unavailable while REDIS_URL is configured",
+                        details={"redis_url_configured": True},
+                    )
                 logger.info("DistributedRuntime connected to Redis")
             except Exception as e:
-                logger.warning(f"Could not initialize distributed runtime: {e}")
+                if allow_lenient_wiring():
+                    logger.warning(f"Could not initialize distributed runtime in lenient wiring mode: {e}")
+                else:
+                    raise
 
         # Initialize roles
         self.roles = {}

@@ -6,6 +6,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from truepresence.runtime.wiring import allow_lenient_wiring, load_component
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -29,43 +31,58 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    try:
-        from truepresence.api.server import app as rest_app
-    except Exception as exc:
-        logger.warning("REST API unavailable during app bootstrap: %s", exc)
-    else:
+    rest_app = load_component(
+        label="REST API",
+        loader=lambda: __import__("truepresence.api.server", fromlist=["app"]).app,
+        logger=logger,
+    )
+    if rest_app is not None:
         app.mount("/api", rest_app)
 
-    try:
-        from truepresence.api.ws_server import router as ws_router
-    except Exception as exc:
-        logger.warning("WebSocket router unavailable during app bootstrap: %s", exc)
-    else:
+    ws_router = load_component(
+        label="WebSocket router",
+        loader=lambda: __import__("truepresence.api.ws_server", fromlist=["router"]).router,
+        logger=logger,
+    )
+    if ws_router is not None:
         app.include_router(ws_router, tags=["websocket"])
 
-    try:
-        from truepresence.adapters.telegram_bot import router as telegram_router
-    except Exception as exc:
-        logger.warning("Telegram router unavailable during app bootstrap: %s", exc)
-    else:
+    telegram_router = load_component(
+        label="Telegram router",
+        loader=lambda: __import__("truepresence.adapters.telegram_bot", fromlist=["router"]).router,
+        logger=logger,
+    )
+    if telegram_router is not None:
         app.include_router(telegram_router)
 
-    try:
-        from truepresence.api.auth import router as auth_router
-    except Exception as exc:
-        logger.warning("Auth router unavailable during app bootstrap: %s", exc)
-    else:
+    auth_router = load_component(
+        label="Auth router",
+        loader=lambda: __import__("truepresence.api.auth", fromlist=["router"]).router,
+        logger=logger,
+    )
+    if auth_router is not None:
         app.include_router(auth_router)
 
     @app.on_event("startup")
     async def startup() -> None:
+        database_configured = any(
+            key in os.environ
+            for key in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
+        )
+        if not database_configured:
+            logger.info("Database init skipped: no database environment configured")
+            return
+
         try:
             from truepresence.db import init_db
 
             init_db()
             logger.info("Database initialized")
         except Exception as exc:
-            logger.warning("Database init skipped (DATABASE_URL not set?): %s", exc)
+            if allow_lenient_wiring():
+                logger.warning("Database init failed in lenient wiring mode: %s", exc)
+                return
+            raise
 
     @app.get("/health")
     def health() -> dict[str, str]:

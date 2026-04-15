@@ -10,7 +10,9 @@ from truepresence.decision.tier_router import choose_tier
 from truepresence.evidence.argument_graph import ArgumentGraph, build_argument_graph
 from truepresence.evidence.packet import EvidencePacket
 from truepresence.evidence.packet_builder import build_evidence_packet
+from truepresence.exceptions import ConfigurationError
 from truepresence.memory.session_timeline import SessionTimeline
+from truepresence.runtime.wiring import allow_lenient_wiring
 
 
 def _legacy_decision_for_state(state: str) -> str:
@@ -79,6 +81,10 @@ class DecisionResult:
                 for report in self.decision_artifact.get("role_reports", [])
             },
             "final": final,
+            "runtime": {
+                "mode": self.decision_artifact.get("metadata", {}).get("runtime_mode", "full"),
+                "degraded_reason": self.decision_artifact.get("metadata", {}).get("runtime_degraded_reason"),
+            },
             "decision_object": decision.model_dump(),
             "evidence_packet": self.evidence_packet.model_dump(),
             "decision_artifact": dict(self.decision_artifact),
@@ -98,9 +104,11 @@ class _NoOpIdentityGraph:
 
 
 class _NoOpEnsembleRuntime:
-    def __init__(self) -> None:
+    def __init__(self, error: Exception | None = None) -> None:
         self.memory = SessionTimeline()
         self.identity_graph = _NoOpIdentityGraph()
+        self.mode = "fallback"
+        self.degraded_reason = type(error).__name__ if error else None
 
     def run(self, **kwargs):
         return []
@@ -114,13 +122,23 @@ class TruePresenceDecisionEngine:
         if ensemble_runtime is None:
             try:
                 from truepresence.ensemble.orchestrator import TruePresenceEnsembleRuntime
-            except Exception:
-                ensemble_runtime = _NoOpEnsembleRuntime()
+            except Exception as exc:
+                if not allow_lenient_wiring():
+                    raise ConfigurationError(
+                        message="Canonical ensemble runtime wiring failed",
+                        details={"error_type": type(exc).__name__},
+                    ) from exc
+                ensemble_runtime = _NoOpEnsembleRuntime(exc)
             else:
                 try:
                     ensemble_runtime = TruePresenceEnsembleRuntime()
-                except Exception:
-                    ensemble_runtime = _NoOpEnsembleRuntime()
+                except Exception as exc:
+                    if not allow_lenient_wiring():
+                        raise ConfigurationError(
+                            message="Canonical ensemble runtime initialization failed",
+                            details={"error_type": type(exc).__name__},
+                        ) from exc
+                    ensemble_runtime = _NoOpEnsembleRuntime(exc)
         self.ensemble_runtime = ensemble_runtime
         self.artifact_store = artifact_store or ArtifactStore()
 
@@ -216,7 +234,11 @@ class TruePresenceDecisionEngine:
             },
             "threat_categories": packet.risk_context.get("threats_detected", []),
             "block_reason": "Deterministic policy violation" if tier == "tier0" else "",
-            "metadata": decision.metadata,
+            "metadata": {
+                **decision.metadata,
+                "runtime_mode": getattr(self.ensemble_runtime, "mode", "full"),
+                "runtime_degraded_reason": getattr(self.ensemble_runtime, "degraded_reason", None),
+            },
         }
 
         self.artifact_store.store_evidence_packet(packet)

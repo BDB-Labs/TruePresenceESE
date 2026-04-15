@@ -12,6 +12,8 @@ import time
 from collections import defaultdict, deque
 from typing import Any, Dict, Optional
 
+from truepresence.exceptions import EvidenceError
+
 logger = logging.getLogger(__name__)
 
 
@@ -190,7 +192,13 @@ class TelegramAdapter:
                 
         except Exception as e:
             logger.error(f"Failed to parse Telegram update: {e}", exc_info=True)
-            return None
+            raise EvidenceError(
+                message="Failed to parse Telegram update",
+                details={
+                    "error_type": type(e).__name__,
+                    "update_keys": sorted(update.keys()),
+                },
+            ) from e
     
     def _parse_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a message event with threat detection."""

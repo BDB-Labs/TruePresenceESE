@@ -17,6 +17,7 @@ import logging
 
 from truepresence.decision.engine import TruePresenceDecisionEngine
 from truepresence.memory.session_timeline import SessionTimeline
+from truepresence.runtime.wiring import load_required_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ class _FallbackOrchestrator:
         self.memory = SessionTimeline()
         self.identity_graph = _FallbackIdentityGraph()
         self._error = error
+        self.mode = "fallback"
+        self.degraded_reason = type(error).__name__ if error else None
 
     def run(self, **kwargs):
         return []
@@ -52,14 +55,13 @@ class _FallbackOrchestrator:
 
 
 logger.info("Initializing shared TruePresence decision runtime")
-try:
-    from truepresence.core.orchestrator_v3 import TruePresenceOrchestratorV3
-    from truepresence.ensemble.orchestrator import TruePresenceEnsembleRuntime
-
-    orchestrator = TruePresenceEnsembleRuntime(TruePresenceOrchestratorV3())
-except Exception as exc:
-    logger.warning("Falling back to lightweight TruePresence runtime: %s", exc)
-    orchestrator = _FallbackOrchestrator(exc)
+orchestrator = load_required_runtime(
+    loader=lambda: __import__("truepresence.ensemble.orchestrator", fromlist=["TruePresenceEnsembleRuntime"]).TruePresenceEnsembleRuntime(
+        __import__("truepresence.core.orchestrator_v3", fromlist=["TruePresenceOrchestratorV3"]).TruePresenceOrchestratorV3()
+    ),
+    fallback_factory=lambda exc: _FallbackOrchestrator(exc),
+    logger=logger,
+)
 
 decision_engine = TruePresenceDecisionEngine(ensemble_runtime=orchestrator)
 logger.info("Shared runtime ready")

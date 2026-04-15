@@ -229,7 +229,9 @@ def health_check():
         return {
             "status": "ok",
             "orchestrator": orchestrator_type,
-            "has_health_check": has_health_check
+            "has_health_check": has_health_check,
+            "runtime_mode": getattr(shared_orchestrator, "mode", "full"),
+            "runtime_degraded_reason": getattr(shared_orchestrator, "degraded_reason", None),
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}", exc_info=True)
