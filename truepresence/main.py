@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 import logging
 import os
 
@@ -22,8 +24,38 @@ ALLOWED_ORIGINS = [
 ]
 
 
+def _database_configured() -> bool:
+    return any(
+        key in os.environ
+        for key in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
+    )
+
+
+def _initialize_database_if_configured() -> None:
+    if not _database_configured():
+        logger.info("Database init skipped: no database environment configured")
+        return
+
+    try:
+        from truepresence.db import init_db
+
+        init_db()
+        logger.info("Database initialized")
+    except Exception as exc:
+        if allow_lenient_wiring():
+            logger.warning("Database init failed in lenient wiring mode: %s", exc)
+            return
+        raise
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    _initialize_database_if_configured()
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="TruePresence", version="1.0.0")
+    app = FastAPI(title="TruePresence", version="1.0.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,
@@ -62,27 +94,6 @@ def create_app() -> FastAPI:
     )
     if auth_router is not None:
         app.include_router(auth_router)
-
-    @app.on_event("startup")
-    async def startup() -> None:
-        database_configured = any(
-            key in os.environ
-            for key in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
-        )
-        if not database_configured:
-            logger.info("Database init skipped: no database environment configured")
-            return
-
-        try:
-            from truepresence.db import init_db
-
-            init_db()
-            logger.info("Database initialized")
-        except Exception as exc:
-            if allow_lenient_wiring():
-                logger.warning("Database init failed in lenient wiring mode: %s", exc)
-                return
-            raise
 
     @app.get("/health")
     def health() -> dict[str, str]:
