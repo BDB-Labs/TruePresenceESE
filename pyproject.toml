@@ -18,24 +18,23 @@ dependencies = [
   "redis>=5.2",
   "python-dotenv>=1.0",
   "pydantic>=2.7",
-  "orjson>=3.10",
-  "aiohttp>=3.11",
+  "orjson>=3.11.6",
+  "aiohttp>=3.13.4",
   "numpy>=1.26",
   "tenacity>=9.0",
   "psycopg2-binary>=2.9",
   "passlib[bcrypt]>=1.7",
-  "python-jose[cryptography]>=3.3",
-  "python-multipart>=0.0",
+  "python-multipart>=0.0.22",
   "httpx>=0.28",
   "gunicorn>=23.0",
-  "requests>=2.32",
+  "requests>=2.33.0",
   "certifi>=2025",
-  "urllib3>=2.3",
+  "urllib3>=2.6.3",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0",
+  "pytest>=9.0.3",
   "ruff>=0.4",
   "mypy>=1.11",
 ]
