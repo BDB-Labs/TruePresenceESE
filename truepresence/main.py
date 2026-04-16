@@ -17,6 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 ALLOWED_ORIGINS = [
+    "https://truepresence.bageltech.net",
     "https://verify.bageltech.net",
     "https://www.bageltech.net",
     "https://bageltech.net",
