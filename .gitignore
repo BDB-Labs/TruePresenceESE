@@ -1,3 +1,9 @@
+# Environment files
+.env
+.env.*
+!.env.local  # Keep local template reference but never commit actual values
+*.log
+
 # Python cache/build artifacts
 __pycache__/
 *.py[cod]
@@ -8,9 +14,23 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
-.env.local
 
 # Local build outputs
 build/
 dist/
 artifacts/
+.vercel
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Database files
+*.sqlite
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

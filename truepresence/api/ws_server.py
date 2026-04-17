@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from collections import defaultdict
 from typing import Dict, List
@@ -19,6 +20,9 @@ redteam_evaluator = RedTeamEvaluator()
 connections: Dict[str, List[WebSocket]] = defaultdict(list)
 session_events: Dict[str, List[dict]] = defaultdict(list)
 session_modes: Dict[str, str] = defaultdict(str)
+challenge_last_issued: Dict[str, float] = {}  # Track last challenge time per session
+SESSION_EVENT_CAP = 500  # Max events to retain per session
+CHALLENGE_COOLDOWN_SECONDS = 30  # Minimum seconds between challenges
 
 CHALLENGE_PROMPTS = [
     "Without pausing, type the last word you just read.",
@@ -67,6 +71,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # 2. Store and Evaluate via shared orchestrator
             session_events[session_id].append(event)
+            # Cap session events to prevent unbounded memory growth
+            if len(session_events[session_id]) > SESSION_EVENT_CAP:
+                session_events[session_id] = session_events[session_id][-SESSION_EVENT_CAP:]
             result = shared_decision_engine.evaluate(
                 surface="web_guard",
                 session_id=session_id,
@@ -97,14 +104,19 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             # 3. Trust Update
             await websocket.send_json({"type": "trust_update", "data": result})
 
-            # 4. Adaptive Challenge Injection (Uncertainty Zone)
+            # 4. Adaptive Challenge Injection (Uncertainty Zone) with cooldown
             score = trust_score
-            if 0.35 < score < 0.75:
+            current_time = time.time()
+            last_challenge_time = challenge_last_issued.get(session_id, 0)
+            time_since_last_challenge = current_time - last_challenge_time
+            
+            if 0.35 < score < 0.75 and time_since_last_challenge >= CHALLENGE_COOLDOWN_SECONDS:
                 challenge = {
                     "id": str(uuid.uuid4()),
                     "prompt": CHALLENGE_PROMPTS[stable_index(session_id, len(CHALLENGE_PROMPTS))],
-                    "created_at": __import__("time").time()
+                    "created_at": current_time
                 }
+                challenge_last_issued[session_id] = current_time
                 # Track in validator
                 validator.issue_challenge(session_id, challenge["prompt"])
                 await websocket.send_json({

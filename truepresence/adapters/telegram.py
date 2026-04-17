@@ -13,8 +13,13 @@ from collections import defaultdict, deque
 from typing import Any, Dict, Optional
 
 from truepresence.exceptions import EvidenceError
+from truepresence.db import get_db
 
 logger = logging.getLogger(__name__)
+
+# Rate limiting for ban actions
+_ban_actions: Dict[str, float] = {}  # user_id -> timestamp
+BAN_COOLDOWN_SECONDS = 60  # Minimum seconds between ban actions per user
 
 
 class TelegramAdapter:
@@ -208,16 +213,12 @@ class TelegramAdapter:
         user_id = str(from_user.get("id", "unknown"))
         msg_timestamp = message.get("date", time.time())
 
-        # Analyze content for threats
-        threat_analysis = self._analyze_content(text)
-
-        # Calculate message velocity (messages per minute in last 60s)
-        self._user_message_times[user_id].append(msg_timestamp)
-        recent = [t for t in self._user_message_times[user_id] if msg_timestamp - t <= 60]
-        message_velocity = len(recent)  # messages in last 60 seconds
-
         # Calculate content similarity (avg Jaccard against last 10 messages)
         content_similarity = self._calc_content_similarity(user_id, text)
+        self._user_recent_texts[user_id].append(text)
+        
+        # Analyze content for threats (pass similarity for mirror detection)
+        threat_analysis = self._analyze_content(text, content_similarity)
         self._user_recent_texts[user_id].append(text)
 
         # Extract scores safely from threat_analysis
@@ -267,7 +268,7 @@ class TelegramAdapter:
             "threat_analysis": threat_analysis
         }
     
-    def _analyze_content(self, text: str) -> Dict[str, Any]:
+    def _analyze_content(self, text: str, content_similarity: float = 0.0) -> Dict[str, Any]:
         """Analyze message content for specific threat categories with tenant configuration."""
         text_lower = text.lower()
         
@@ -288,7 +289,7 @@ class TelegramAdapter:
                 continue
             
             matches = pattern.findall(text_lower)
-            score = min(1.0, len(matches) * 0.5)
+            score = min(1.0, len(matches) * 0.25)  # Require multiple matches for higher score
             
             results["scores"][detector_name] = score
             results["matches"][detector_name] = matches
@@ -296,21 +297,28 @@ class TelegramAdapter:
             # Determine if threat is detected based on tier-specific thresholds
             if score > 0:
                 if config['tier'] == 'core':
-                    # Core threats: lower threshold, immediate detection
-                    if score > 0.1:
+                    # Core threats: require stronger signal to reduce false positives
+                    if score >= 0.5:
                         results["threats_detected"].append(detector_name)
                 else:
                     # Policy/custom threats: standard threshold
-                    if score > 0.5:
+                    if score >= 0.5:
                         results["threats_detected"].append(detector_name)
         
-        # Mirror detection (simplified - would need cross-group analysis)
+        # Mirror detection (improved - requires multiple signals to reduce false positives)
         mirrored_score = 0.0
-        if len(text) > 100 and any(word in text_lower for word in ["join", "channel", "subscribe", "follow"]):
-            mirrored_score = 0.7
-            if mirrored_score > 0.6:
-                results["threats_detected"].append("mirrors_userbots")
-            results["scores"]["mirrored_content"] = mirrored_score
+        # Only flag as mirror if text is long AND contains multiple promotional keywords
+        # AND has high content similarity (bot-like repetition)
+        promotional_keywords = sum(1 for word in ["join", "channel", "subscribe", "follow", "link", "free", "gift", "promo"] if word in text_lower)
+        if len(text) > 150 and promotional_keywords >= 2:
+            # Additional signal: check content similarity for spam pattern
+            if content_similarity > 0.6:  # Requires actual repetitive behavior
+                mirrored_score = 0.7
+                if mirrored_score > 0.6:
+                    results["threats_detected"].append("mirrors_userbots")
+        results["scores"]["mirrored_content"] = mirrored_score
+        
+        return results
         
         return results
     
@@ -343,7 +351,7 @@ class TelegramAdapter:
                 "crypto_mining_indicators": 0.0,
                 "vnc_indicators": 0.0,
                 "copyright_indicators": 0.0,
-                "illegal_indicators": [],
+                "illegal_indicators": 0.0,
                 "mirrored_content_score": 0.0,
             },
             "context": {
@@ -423,21 +431,51 @@ class TelegramAdapter:
         return round(entropy, 2)
     
     def _get_warning_count(self, user_id: int) -> int:
-        """Get number of previous warnings for this user."""
-        # Would query database in production
-        return 0
+        """Get number of previous warnings for this user from database."""
+        if not user_id:
+            return 0
+        try:
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*) as warning_count FROM user_warnings WHERE user_id = %s",
+                        (user_id,)
+                    )
+                    result = cur.fetchone()
+                    return result.get("warning_count", 0) if result else 0
+        except Exception as e:
+            logger.warning(f"Failed to get warning count for user {user_id}: {e}")
+            return 0
     
-    def build_response(self, evaluation_result: Dict[str, Any], tenant_id: str = None) -> Dict[str, Any]:
+    def build_response(self, evaluation_result: Dict[str, Any], tenant_id: str = None, user_id: int = None) -> Dict[str, Any]:
         """
         Convert TruePresence result to Telegram action.
 
         Args:
             evaluation_result: Result from orchestrator.evaluate()
             tenant_id: Optional tenant identifier for context
+            user_id: Optional user identifier for rate limiting
 
         Returns:
             Action dictionary for Telegram bot to execute
         """
+        import time as time_module
+        current_time = time_module.time()
+        
+        # Check rate limit for ban actions
+        if user_id is not None:
+            last_ban_time = _ban_actions.get(user_id, 0)
+            if current_time - last_ban_time < BAN_COOLDOWN_SECONDS:
+                # Rate limited - downgrade to alert instead of immediate ban
+                logger.info(f"Rate-limited ban for user {user_id}, downgrading to alert")
+                return {
+                    "action": "alert_admin",
+                    "reason": f"Rate-limited: {evaluation_result.get('risk_factors', [])}",
+                    "confidence": evaluation_result.get("confidence", 0.0),
+                    "tenant_id": tenant_id,
+                    "rate_limited": True
+                }
+        
         state = evaluation_result.get("state")
         decision = evaluation_result.get("decision", "allow")
         confidence = evaluation_result.get("confidence", 0.0)
@@ -448,6 +486,9 @@ class TelegramAdapter:
         block_reason = evaluation_result.get("block_reason", "")
         
         if state == "EJECT":
+            # Track ban action for rate limiting
+            if user_id is not None:
+                _ban_actions[user_id] = current_time
             return {
                 "action": "ban",
                 "reason": block_reason or "Deterministic policy violation",
@@ -481,8 +522,10 @@ class TelegramAdapter:
 
         # More aggressive blocking for confirmed threats
         if threat_categories:
-            # Any confirmed threat category = immediate block
+            # Any confirmed threat category = immediate block (with rate limiting)
             if confidence > 0.6:
+                if user_id is not None:
+                    _ban_actions[user_id] = current_time
                 return {
                     "action": "ban",
                     "reason": block_reason or f"Threat detected: {', '.join(threat_categories)}",
@@ -492,6 +535,8 @@ class TelegramAdapter:
                 }
         
         if decision == "block" and confidence > 0.8:
+            if user_id is not None:
+                _ban_actions[user_id] = current_time
             return {
                 "action": "ban",
                 "reason": block_reason or f"Bot detected ({human_prob:.0%} human probability)",
