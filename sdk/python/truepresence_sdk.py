@@ -5,9 +5,9 @@ This SDK provides a simple Python client for integrating TruePresence
 bot detection into applications.
 """
 
+from typing import Any, Dict, List
+
 import requests
-from typing import Dict, Any, Optional, List
-import uuid
 
 
 class TruePresenceClient:

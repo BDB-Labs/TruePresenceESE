@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Shield, Eye, EyeOff, AlertCircle } from "lucide-react";
 
 interface LoginResponse {
-  access_token: string;
   user: {
     id: string;
     email: string;
@@ -29,8 +28,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://verify.bageltech.net";
-      const res = await fetch(`${apiUrl}/auth/login`, {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -42,9 +40,7 @@ export default function LoginPage() {
       }
 
       const data: LoginResponse = await res.json();
-      
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      sessionStorage.setItem("user", JSON.stringify(data.user));
       
       router.push("/dashboard");
     } catch (err) {

@@ -7,9 +7,10 @@ rather than collapsing all role outputs into a single weighted score.
 CRITICAL: This system does NOT fail silently. All errors are propagated.
 """
 
-import numpy as np
-from typing import Dict, Any, List
 import logging
+from typing import Any, Dict
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ class EnsembleSynthesis:
                 "variance": float(variance),
                 "role_outputs": role_results,
                 "evidence": evidence,
-                "weights_used": {role: float(weight) for role, weight in zip(role_outputs.keys(), weights)}
+                "weights_used": {role: float(weight) for role, weight in zip(role_outputs.keys(), weights, strict=False)}
             }
         except Exception as e:
             logger.error(f"Synthesis FAILED: {e}", exc_info=True)

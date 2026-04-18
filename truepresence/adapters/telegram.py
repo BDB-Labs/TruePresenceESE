@@ -12,8 +12,8 @@ import time
 from collections import defaultdict, deque
 from typing import Any, Dict, Optional
 
-from truepresence.exceptions import EvidenceError
 from truepresence.db import get_db
+from truepresence.exceptions import EvidenceError
 
 logger = logging.getLogger(__name__)
 
@@ -213,9 +213,14 @@ class TelegramAdapter:
         user_id = str(from_user.get("id", "unknown"))
         msg_timestamp = message.get("date", time.time())
 
+        message_times = self._user_message_times[user_id]
+        while message_times and msg_timestamp - message_times[0] > 60:
+            message_times.popleft()
+        message_times.append(msg_timestamp)
+        message_velocity = len(message_times)
+
         # Calculate content similarity (avg Jaccard against last 10 messages)
         content_similarity = self._calc_content_similarity(user_id, text)
-        self._user_recent_texts[user_id].append(text)
         
         # Analyze content for threats (pass similarity for mirror detection)
         threat_analysis = self._analyze_content(text, content_similarity)

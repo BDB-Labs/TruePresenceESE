@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from truepresence.exceptions import ConfigurationError
 

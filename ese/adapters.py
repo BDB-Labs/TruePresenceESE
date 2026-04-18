@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import re
+import secrets
 import socket
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ese.local_runtime import (
@@ -17,6 +18,9 @@ from ese.local_runtime import (
     ensure_local_runtime_ready,
     local_base_url,
 )
+
+_RETRY_RNG = secrets.SystemRandom()
+MAX_RETRY_AFTER_SECONDS = 30.0
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_CUSTOM_API_KEY_ENV = "CUSTOM_API_KEY"
@@ -300,7 +304,33 @@ def _redact_error_text(text: str) -> str:
 
 
 def _retry_delay(retry_backoff_seconds: float, attempt: int) -> float:
-    return retry_backoff_seconds * attempt * random.uniform(0.9, 1.1)
+    return retry_backoff_seconds * attempt * _RETRY_RNG.uniform(0.9, 1.1)
+
+
+def _parse_retry_after(header_value: str | None) -> float | None:
+    if not header_value:
+        return None
+    try:
+        return float(header_value)
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(header_value)
+        now = datetime.now(timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta = (dt - now).total_seconds()
+        return max(delta, 0) if delta > 0 else None
+    except Exception:
+        return None
+
+
+def _retry_after_delay(header_value: str | None) -> float | None:
+    retry_after = _parse_retry_after(header_value)
+    if retry_after is None:
+        return None
+    return min(retry_after, MAX_RETRY_AFTER_SECONDS)
 
 
 def _execute_responses_request(
@@ -349,6 +379,11 @@ def _execute_responses_request(
                 f"attempt={attempt}/{attempts} body={_truncate_for_error(_redact_error_text(response_body))}"
             )
             if attempt < attempts and _is_retryable_status(status):
+                if status == 429:
+                    retry_after = _retry_after_delay(err.headers.get("Retry-After"))
+                    if retry_after is not None:
+                        time.sleep(retry_after)
+                        continue
                 time.sleep(_retry_delay(retry_backoff_seconds, attempt))
                 continue
 

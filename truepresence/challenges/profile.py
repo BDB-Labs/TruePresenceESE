@@ -6,9 +6,10 @@ Questions only trigger when risk is above threshold - never for normal users.
 This is NOT an identity system - it's episodic verification reinforcement only.
 """
 
-import yaml
 import os
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 from truepresence.challenges.deterministic import stable_challenge_id, stable_index
 

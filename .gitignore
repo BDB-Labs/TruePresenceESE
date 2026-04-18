@@ -1,7 +1,8 @@
 # Environment files
 .env
 .env.*
-!.env.local  # Keep local template reference but never commit actual values
+!.env.example
+!.env.local.example
 *.log
 
 # Python cache/build artifacts
@@ -20,6 +21,10 @@ build/
 dist/
 artifacts/
 .vercel
+node_modules/
+truepresence/ui/.next/
+truepresence/ui/next-env.d.ts
+*.tsbuildinfo
 
 # OS artifacts
 .DS_Store

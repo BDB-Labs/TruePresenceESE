@@ -13,11 +13,12 @@ CRITICAL: This system does NOT fail silently. All errors are propagated
 with full context for debugging and monitoring.
 """
 
-from typing import Dict, Any, Optional
 import logging
-from truepresence.core.synthesis.synth import EnsembleSynthesis
-from truepresence.core.memory.session_memory import SessionMemory
+from typing import Any, Dict
+
 from truepresence.adaptive.weighting import AdaptiveWeights
+from truepresence.core.memory.session_memory import SessionMemory
+from truepresence.core.synthesis.synth import EnsembleSynthesis
 from truepresence.exceptions import OrchestratorError, wrap_role_error
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,11 @@ class TruePresenceOrchestrator:
     def _initialize_roles(self):
         """Initialize available roles dynamically using unified Role interface."""
         from truepresence.core.roles.base import (
-            LivenessRole, AdversarialRole, MediationRole, RelayRole, SynthesizerRole
+            AdversarialRole,
+            LivenessRole,
+            MediationRole,
+            RelayRole,
+            SynthesizerRole,
         )
         
         role_mapping = {
@@ -72,7 +77,7 @@ class TruePresenceOrchestrator:
                 raise OrchestratorError(
                     message=f"Failed to initialize role {role_name}",
                     details={"role": role_name, "error": str(e)}
-                )
+                ) from e
     
     def build_evidence(self, session: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -105,7 +110,7 @@ class TruePresenceOrchestrator:
             raise OrchestratorError(
                 message=f"Failed to build evidence: {str(e)}",
                 details={"session_id": session.get("session_id")}
-            )
+            ) from e
     
     def evaluate(self, session: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -135,7 +140,7 @@ class TruePresenceOrchestrator:
                 role_outputs[role_name] = role.evaluate(evidence, session)
             except Exception as e:
                 logger.error(f"Role {role_name} FAILED during evaluate: {e}", exc_info=True)
-                raise wrap_role_error(role_name, "evaluate", e)
+                raise wrap_role_error(role_name, "evaluate", e) from e
         
         # Store role outputs in evidence for synthesizer
         evidence["role_outputs"] = role_outputs
@@ -148,11 +153,10 @@ class TruePresenceOrchestrator:
             raise OrchestratorError(
                 message=f"Synthesis failed: {str(e)}",
                 details={"role_outputs": list(role_outputs.keys())}
-            )
+            ) from e
         
         # Calculate final decision
         human_prob = final_result.get("human_probability", 0.5)
-        confidence = final_result.get("confidence", 0.5)
         
         if human_prob > 0.65:
             decision = "allow"

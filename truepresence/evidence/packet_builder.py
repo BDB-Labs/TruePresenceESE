@@ -6,7 +6,6 @@ from typing import Any, Dict, Optional
 
 from truepresence.evidence.packet import EvidencePacket
 
-
 TIMING_KEYS = {
     "response_time_ms",
     "response_time",

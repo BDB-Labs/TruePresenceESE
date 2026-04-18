@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List
 
-from truepresence.decision.decision_object import DecisionObject, DecisionState
 from truepresence.decision import reason_codes as rc
+from truepresence.decision.decision_object import DecisionObject, DecisionState
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:

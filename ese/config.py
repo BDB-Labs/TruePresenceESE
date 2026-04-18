@@ -549,6 +549,14 @@ def resolve_role_model(cfg: Dict[str, Any], role: str) -> str:
     if "model" in role_cfg and role_cfg.get("model"):
         model = role_cfg["model"]
 
+    clean_provider = str(provider).strip().lower()
+    clean_model = str(model).strip().lower()
+    if clean_provider == "unknown" and clean_model == "unknown":
+        raise ConfigValidationError(
+            f"Cannot resolve model for role '{role}': provider and model are both unknown. "
+            f"Set provider.name and provider.model, or configure role-specific provider/model."
+        )
+
     return f"{provider}:{model}"
 
 

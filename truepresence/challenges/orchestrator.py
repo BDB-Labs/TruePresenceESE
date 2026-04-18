@@ -1,5 +1,6 @@
-from typing import Dict, Any
-from truepresence.challenges.engine import create_challenge, Challenge
+from typing import Any, Dict
+
+from truepresence.challenges.engine import Challenge, create_challenge
 
 
 def simple_attention_challenge() -> Challenge:

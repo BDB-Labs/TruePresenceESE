@@ -32,7 +32,7 @@ info:
 servers:
   - url: http://localhost:8000
     description: Local development server
-  - url: https://api.truepresence.io/v1
+  - url: https://api.truepresence.io
     description: Production server
 
 paths:

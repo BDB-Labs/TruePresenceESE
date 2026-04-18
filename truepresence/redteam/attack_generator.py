@@ -1,8 +1,6 @@
 import random
 import time
-import uuid
-import numpy as np
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 
 class AttackGenerator:
@@ -32,7 +30,7 @@ class AttackGenerator:
         patterns = []
         
         # Generate 5 different human-like patterns
-        for i in range(5):
+        for _i in range(5):
             pattern = {
                 "mouse_variance": random.uniform(0.7, 1.2),
                 "typing_speed": random.uniform(0.8, 1.5),

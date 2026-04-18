@@ -8,9 +8,9 @@ CRITICAL: This system does NOT fail silently. All errors are propagated
 with full context for debugging and monitoring.
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
 import logging
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

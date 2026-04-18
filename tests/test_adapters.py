@@ -8,6 +8,7 @@ from ese.adapters import (
     AdapterExecutionError,
     _openai_payload,
     _redact_error_text,
+    _retry_after_delay,
     _retry_delay,
     custom_api_adapter,
     local_adapter,
@@ -275,6 +276,14 @@ def test_redact_error_text_removes_token_like_values() -> None:
 
 
 def test_retry_delay_supports_deterministic_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ese.adapters.random.uniform", lambda left, right: 1.05)
+    class _Rng:
+        def uniform(self, left: float, right: float) -> float:
+            return 1.05
+
+    monkeypatch.setattr("ese.adapters._RETRY_RNG", _Rng())
 
     assert _retry_delay(2.0, 3) == pytest.approx(6.3)
+
+
+def test_retry_after_delay_is_capped() -> None:
+    assert _retry_after_delay("120") == 30.0

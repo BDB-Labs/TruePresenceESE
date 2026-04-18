@@ -5,7 +5,7 @@ Custom exceptions for TruePresence system with proper error propagation.
 Critical systems should not fail silently.
 """
 
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
 
 
 class TruePresenceError(Exception):

@@ -5,9 +5,9 @@ This test harness instantiates RuntimeEngine and runs BotSimulator through it,
 providing measurable answers to "does TruePresence actually detect bots?"
 """
 
-import time
 import random
-from typing import Dict, Any, List
+import time
+from typing import Any, Dict, List
 
 
 class BotSimulator:
@@ -26,7 +26,7 @@ class BotSimulator:
     def generate_bot_events(self, count: int = 100) -> List[Dict[str, Any]]:
         """Generate pure bot events."""
         events = []
-        for i in range(count):
+        for _i in range(count):
             events.append({
                 "session_id": self.session_id,
                 "event_type": "key_timing",
@@ -79,7 +79,7 @@ class BotSimulator:
         """Generate replayed human session events."""
         events = []
         # Simulate a replayed human pattern
-        for i in range(count):
+        for _i in range(count):
             events.append({
                 "session_id": self.session_id,
                 "event_type": "key_timing",
@@ -215,7 +215,7 @@ def run_adversarial_test(steps: int = 100, bot_type: str = "bot"):
     avg_human_prob = sum(results["human_probabilities"]) / len(results["human_probabilities"])
     detection_rate = results["bot_detected"] / results["total_events"] if results["total_events"] > 0 else 0
     
-    print(f"Results:")
+    print("Results:")
     print(f"  Total Events: {results['total_events']}")
     print(f"  Bot Detected: {results['bot_detected']}")
     print(f"  Human Detected: {results['human_detected']}")

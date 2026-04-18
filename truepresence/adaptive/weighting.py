@@ -6,7 +6,6 @@ replacing hardcoded weights with learned, adaptive ones.
 """
 
 from typing import Dict, List
-import numpy as np
 
 
 class AdaptiveWeights:

@@ -1,5 +1,6 @@
 import statistics
 from typing import List
+
 from truepresence.core.events import Event
 
 

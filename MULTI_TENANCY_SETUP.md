@@ -49,18 +49,18 @@ All endpoints now support tenant isolation:
 
 ```bash
 # Register a group for a specific tenant
-POST /groups/{group_id}/protect?tenant=client1
+POST /telegram/groups/{group_id}/protect?tenant=client1
 
 # Get status for a specific tenant
-GET /status
+GET /telegram/status
 Headers: X-Tenant-ID: client1
 
 # Get all reviews for a tenant
-GET /reviews
+GET /telegram/reviews
 Headers: X-Tenant-ID: client1
 
 # Resolve a review for a tenant
-POST /reviews/{id}/resolve
+POST /telegram/reviews/{id}/resolve
 Headers: X-Tenant-ID: client1
 ```
 
@@ -82,10 +82,10 @@ docker run -e TELEGRAM_BOT_TOKEN=client2_token -e TENANT_ID=client2 truepresence
 
 ```bash
 # Webhook URL format
-https://your-domain.com/webhook?tenant=client1
+https://your-domain.com/telegram/webhook?tenant=client1
 
 # Or using headers
-curl -X POST https://your-domain.com/webhook \
+curl -X POST https://your-domain.com/telegram/webhook \
   -H "X-Tenant-ID: client1" \
   -H "Content-Type: application/json" \
   -d '{"update_id": 123, "message": {...}}'
@@ -95,10 +95,10 @@ curl -X POST https://your-domain.com/webhook \
 
 ```bash
 # Client 1 webhook
-https://client1.your-domain.com/webhook
+https://client1.your-domain.com/telegram/webhook
 
 # Client 2 webhook
-https://client2.your-domain.com/webhook
+https://client2.your-domain.com/telegram/webhook
 ```
 
 ## Admin Notification Setup
@@ -160,13 +160,13 @@ For production use with persistent storage:
 2. **Configure webhook URLs**:
    ```bash
    # For each tenant
-   curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://your-app.up.railway.app/webhook?tenant=client1"
+   curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://your-app.up.railway.app/telegram/webhook?tenant=client1"
    ```
 
 3. **Register admin chats**:
    ```bash
    # Call the protect endpoint for each group
-   POST /groups/12345/protect?tenant=client1&admin_chat_id=99999
+   POST /telegram/groups/12345/protect?tenant=client1&admin_chat_id=99999
    ```
 
 ### For Docker Deployment
@@ -190,10 +190,10 @@ services:
 
 ```bash
 # Get status for all tenants
-GET /status?all=true
+GET /telegram/status?all=true
 
 # Get status for specific tenant
-GET /status
+GET /telegram/status
 Headers: X-Tenant-ID: client1
 ```
 

@@ -10,10 +10,11 @@ Run this once after first deploy to create your account.
 
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from truepresence.db import init_db, get_db
 from truepresence.api.auth import hash_password
+from truepresence.db import get_db, init_db
 
 email = os.environ.get("ADMIN_EMAIL")
 password = os.environ.get("ADMIN_PASSWORD")

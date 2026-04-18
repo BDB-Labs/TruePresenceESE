@@ -1,7 +1,9 @@
-from typing import List, Dict, Any
+import statistics
+from typing import Any, Dict, List
+
 from truepresence.core.events import Event
 from truepresence.core.evidence import EvidenceBundle
-import statistics
+
 
 class EvidenceAdapter:
     """

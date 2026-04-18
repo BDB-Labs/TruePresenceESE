@@ -1,13 +1,11 @@
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 
 class TrustSynthesizer:
     """
     Combines analyst findings and adversarial review into a final trust score.
     """
     def synthesize(self, analysts: List[Dict[str, Any]], adversary: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
-        # Weights from config
-        weights = config.get("signals", {})
-        
         # Calculate base score from analysts
         # We map the findings to confidence levels
         base_score = 0.0

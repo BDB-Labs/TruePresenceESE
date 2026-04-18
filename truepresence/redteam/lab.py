@@ -6,7 +6,7 @@ into a complete testing loop that generates attacks, evaluates detection, and fe
 """
 
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict
 
 
 class AdversarialLab:

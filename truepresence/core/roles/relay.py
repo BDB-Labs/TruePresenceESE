@@ -1,4 +1,5 @@
-from typing import Dict, Any
+from typing import Any, Dict
+
 
 class RelayAnalyst:
     def analyze(self, evidence: Dict[str, Any]) -> Dict[str, Any]:

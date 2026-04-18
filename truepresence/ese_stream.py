@@ -1,6 +1,6 @@
-from collections import deque
-from typing import Dict, Deque, Any
 import statistics
+from collections import deque
+from typing import Any, Deque, Dict
 
 rolling_window: Dict[str, Deque[Dict[str, Any]]] = {}
 

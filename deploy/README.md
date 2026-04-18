@@ -24,7 +24,7 @@
 
 5. **Set Telegram Webhook**
    ```bash
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-railway-url.webhook"
+   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-railway-url/telegram/webhook"
    ```
 
 ---
@@ -50,7 +50,7 @@
 
 4. **Set Webhook**
    ```bash
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-app.fly.dev/webhook"
+   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-app.fly.dev/telegram/webhook"
    ```
 
 ---
@@ -64,14 +64,14 @@
    - New Web Service
    - Connect GitHub repo
    - Build Command: `pip install -r requirements.txt`
-   - Start Command: `gunicorn --bind 0.0.0.0:8000 truepresence.adapters.telegram_bot:app`
+   - Start Command: `uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`
 
 3. **Add Environment Variable**
    - `TELEGRAM_BOT_TOKEN`
 
 4. **Set Webhook**
    ```bash
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-render-url.onrender.com/webhook"
+   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-render-url.onrender.com/telegram/webhook"
    ```
 
 ---
@@ -116,7 +116,7 @@
 
 ### Getting 502 errors?
 - Health check might be failing
-- Check that port is 8000 and gunicorn is binding correctly
+- Check that the server is binding to the platform-provided `PORT`
 
 ---
 

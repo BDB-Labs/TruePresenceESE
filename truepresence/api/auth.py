@@ -17,7 +17,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -216,7 +216,7 @@ def _load_current_user_record(user_id: str) -> Dict[str, Any]:
     return dict(user)
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:  # noqa: B008
     claims = decode_token(credentials.credentials)
     user = _load_current_user_record(claims.get("sub", ""))
 
@@ -231,7 +231,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
 def require_role(minimum_role: str):
     """Dependency that enforces minimum role level from current DB state."""
 
-    def checker(user: dict = Depends(get_current_user)) -> dict:
+    def checker(user: dict = Depends(get_current_user)) -> dict:  # noqa: B008
         user_level = ROLE_HIERARCHY.get(user.get("role"), 0)
         required_level = ROLE_HIERARCHY.get(minimum_role, 0)
         if user_level < required_level:
@@ -278,7 +278,7 @@ def login(request: LoginRequest):
 
 
 @router.get("/me")
-def get_me(user: dict = Depends(get_current_user)):
+def get_me(user: dict = Depends(get_current_user)):  # noqa: B008
     """Return authoritative current user info from the database."""
     return user
 

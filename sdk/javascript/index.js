@@ -148,7 +148,7 @@ class TruePresenceClient {
     const response = await this._request(`/v1/sessions/${sessionId}/reset`, {
       method: 'POST'
     });
-    return response.status === 'ok';
+    return response.status === 'reset';
   }
 
   /**

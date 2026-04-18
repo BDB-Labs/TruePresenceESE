@@ -1,7 +1,7 @@
-from pydantic import BaseModel
-from typing import Literal, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, Literal
 
+from pydantic import BaseModel
 
 EventType = Literal[
     "cursor_move",

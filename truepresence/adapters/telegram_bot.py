@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from truepresence.adapters.telegram import TelegramAdapter
 from truepresence.core.runtime import (
@@ -37,6 +38,31 @@ logger = logging.getLogger(__name__)
 
 # Use router instead of separate app
 router = APIRouter(prefix="/telegram", tags=["telegram"])
+telegram_bearer = HTTPBearer()
+
+
+def _tenant_id_from_request(request: Request) -> str:
+    return request.query_params.get("tenant") or request.headers.get("X-Tenant-ID", "default")
+
+
+def _webhook_secret_for_tenant(tenant_id: str) -> str | None:
+    return os.environ.get(f"TELEGRAM_WEBHOOK_SECRET_{tenant_id.upper()}") or os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+
+
+def _verify_webhook_secret(request: Request, tenant_id: str) -> None:
+    expected = _webhook_secret_for_tenant(tenant_id)
+    if expected and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != expected:
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
+
+
+def require_telegram_admin(credentials: HTTPAuthorizationCredentials = Depends(telegram_bearer)) -> dict:  # noqa: B008
+    """Require a super-admin token for Telegram management endpoints."""
+    from truepresence.api.auth import ROLE_HIERARCHY, get_current_user
+
+    user = get_current_user(credentials)
+    if ROLE_HIERARCHY.get(user.get("role"), 0) < ROLE_HIERARCHY["super_admin"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 
 class TelegramProtectionService:
@@ -58,6 +84,9 @@ class TelegramProtectionService:
         self.tenant_config = self._load_tenant_config(tenant_id)
         self.adapter = TelegramAdapter(self.tenant_config)
         self.guard_adapter = TelegramGuardAdapter(self.decision_engine, response_adapter=self.adapter)
+        self.tenant_configs: Dict[str, Dict[str, Any]] = {tenant_id: self.tenant_config}
+        self.tenant_adapters: Dict[str, TelegramAdapter] = {tenant_id: self.adapter}
+        self.tenant_guard_adapters: Dict[str, TelegramGuardAdapter] = {tenant_id: self.guard_adapter}
         
         # Multi-tenant data structures
         self.admin_chats: Dict[str, set] = {tenant_id: set()}
@@ -72,6 +101,41 @@ class TelegramProtectionService:
         # Tenant metadata
         self.tenant_name = os.environ.get(f"TENANT_NAME_{tenant_id.upper()}", tenant_id)
         self.tenant_created = datetime.now(timezone.utc).isoformat()
+
+    def _bot_token_for_tenant(self, tenant_id: str) -> str | None:
+        return os.environ.get(f"TELEGRAM_BOT_TOKEN_{tenant_id.upper()}") or os.environ.get("TELEGRAM_BOT_TOKEN")
+
+    def _ensure_tenant(self, tenant_id: str) -> None:
+        if tenant_id not in self.admin_chats:
+            self.admin_chats[tenant_id] = set()
+        if tenant_id not in self.protected_groups:
+            self.protected_groups[tenant_id] = set()
+        if tenant_id not in self.user_sessions:
+            self.user_sessions[tenant_id] = {}
+        if tenant_id not in self.pending_reviews:
+            self.pending_reviews[tenant_id] = {}
+        if tenant_id not in self.tenant_configs:
+            self.tenant_configs[tenant_id] = self._load_tenant_config(tenant_id)
+        if tenant_id not in self.tenant_adapters:
+            adapter = TelegramAdapter(self.tenant_configs[tenant_id])
+            self.tenant_adapters[tenant_id] = adapter
+            self.tenant_guard_adapters[tenant_id] = TelegramGuardAdapter(self.decision_engine, response_adapter=adapter)
+
+    def update_tenant_config(self, tenant_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
+        self._ensure_tenant(tenant_id)
+        normalized = {
+            "detectors": dict(config.get("detectors") or {}),
+            "custom_detectors": dict(config.get("custom_detectors") or {}),
+            "response_thresholds": {
+                **self.tenant_configs[tenant_id].get("response_thresholds", {}),
+                **dict(config.get("response_thresholds") or {}),
+            },
+        }
+        self.tenant_configs[tenant_id] = normalized
+        adapter = TelegramAdapter(normalized)
+        self.tenant_adapters[tenant_id] = adapter
+        self.tenant_guard_adapters[tenant_id] = TelegramGuardAdapter(self.decision_engine, response_adapter=adapter)
+        return normalized
 
     def _load_tenant_config(self, tenant_id: str) -> Dict[str, Any]:
         """Load tenant-specific configuration from environment variables."""
@@ -136,15 +200,13 @@ class TelegramProtectionService:
             Action to take or None
         """
         tenant_id = tenant_id or self.tenant_id
-        
-        # Initialize tenant if not exists
-        if tenant_id not in self.user_sessions:
-            self.user_sessions[tenant_id] = {}
-            self.pending_reviews[tenant_id] = {}
+        self._ensure_tenant(tenant_id)
+        adapter = self.tenant_adapters[tenant_id]
+        guard_adapter = self.tenant_guard_adapters[tenant_id]
         
         try:
             # Parse into TruePresence event
-            event = self.adapter.parse_update(update)
+            event = adapter.parse_update(update)
             
             if not event:
                 logger.debug(f"[{tenant_id}] No relevant event to process")
@@ -162,7 +224,7 @@ class TelegramProtectionService:
             session = self.user_sessions[tenant_id][session_id]
             
             # Evaluate with TruePresence
-            decision_result = self.guard_adapter.evaluate_event(
+            decision_result = guard_adapter.evaluate_event(
                 session_id=session_id,
                 tenant_id=tenant_id,
                 event=event,
@@ -171,7 +233,7 @@ class TelegramProtectionService:
             result = decision_result.to_response()
             
             # Convert to Telegram action
-            action = self.guard_adapter.enforce(decision_result.decision)
+            action = guard_adapter.enforce(decision_result.decision)
             
             logger.info(f"[{tenant_id}] Decision: {action['action']} (confidence: {action.get('confidence', 0):.2f})")
             
@@ -198,13 +260,7 @@ class TelegramProtectionService:
     def register_group(self, group_id: int, admin_chat_id: int = None, tenant_id: str = None):
         """Register a group for protection."""
         tenant_id = tenant_id or self.tenant_id
-        
-        # Initialize tenant if not exists
-        if tenant_id not in self.protected_groups:
-            self.protected_groups[tenant_id] = set()
-            self.admin_chats[tenant_id] = set()
-            self.user_sessions[tenant_id] = {}
-            self.pending_reviews[tenant_id] = {}
+        self._ensure_tenant(tenant_id)
         
         self.protected_groups[tenant_id].add(group_id)
         if admin_chat_id:
@@ -214,6 +270,8 @@ class TelegramProtectionService:
     def get_status(self, tenant_id: str = None) -> Dict[str, Any]:
         """Get service status for a tenant or all tenants."""
         tenant_id = tenant_id or self.tenant_id
+        if tenant_id != "all":
+            self._ensure_tenant(tenant_id)
         
         if tenant_id == "all":
             # Return status for all tenants
@@ -253,10 +311,7 @@ class TelegramProtectionService:
     def add_pending_review(self, review_data: Dict[str, Any], tenant_id: str = None):
         """Add a case that requires manual review."""
         tenant_id = tenant_id or self.tenant_id
-        
-        # Initialize tenant if not exists
-        if tenant_id not in self.pending_reviews:
-            self.pending_reviews[tenant_id] = {}
+        self._ensure_tenant(tenant_id)
         
         review_id = str(uuid.uuid4())
         review_data["review_id"] = review_id
@@ -275,6 +330,7 @@ class TelegramProtectionService:
     def resolve_review(self, review_id: str, admin_decision: str, admin_notes: str = "", tenant_id: str = None) -> bool:
         """Resolve a pending review with admin decision."""
         tenant_id = tenant_id or self.tenant_id
+        self._ensure_tenant(tenant_id)
         
         if tenant_id not in self.pending_reviews or review_id not in self.pending_reviews[tenant_id]:
             return False
@@ -306,7 +362,8 @@ class TelegramProtectionService:
         chat_id = original_message.get("chat", {}).get("id")
         message_id = original_message.get("message_id")
         
-        if not self.bot_token:
+        bot_token = self._bot_token_for_tenant(tenant_id)
+        if not bot_token:
             logger.warning("TELEGRAM_BOT_TOKEN not set, cannot execute admin decision")
             return {
                 "status": "failed",
@@ -317,7 +374,7 @@ class TelegramProtectionService:
         # Execute the appropriate Telegram API action
         if admin_decision == "ban":
             # Ban user from chat
-            url = f"https://api.telegram.org/bot{self.bot_token}/banChatMember"
+            url = f"https://api.telegram.org/bot{bot_token}/banChatMember"
             payload = {
                 "chat_id": chat_id,
                 "user_id": user_id
@@ -325,7 +382,7 @@ class TelegramProtectionService:
             
         elif admin_decision == "kick":
             # Kick user from chat (ban for 1 minute)
-            url = f"https://api.telegram.org/bot{self.bot_token}/banChatMember"
+            url = f"https://api.telegram.org/bot{bot_token}/banChatMember"
             payload = {
                 "chat_id": chat_id,
                 "user_id": user_id,
@@ -334,7 +391,7 @@ class TelegramProtectionService:
             
         elif admin_decision == "warn":
             # Send warning message
-            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             payload = {
                 "chat_id": chat_id,
                 "text": "⚠️ Warning: Your message violated group rules. Further violations may result in a ban.",
@@ -343,7 +400,7 @@ class TelegramProtectionService:
             
         elif admin_decision == "delete":
             # Delete the message
-            url = f"https://api.telegram.org/bot{self.bot_token}/deleteMessage"
+            url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
             payload = {
                 "chat_id": chat_id,
                 "message_id": message_id
@@ -427,7 +484,7 @@ class TelegramProtectionService:
         tenant_id = tenant_id or self.tenant_id
         
         try:
-            bot_token = os.environ.get(f"TELEGRAM_BOT_TOKEN_{tenant_id.upper()}") or os.environ.get("TELEGRAM_BOT_TOKEN")
+            bot_token = self._bot_token_for_tenant(tenant_id)
             if not bot_token:
                 logger.warning(f"[{tenant_id}] TELEGRAM_BOT_TOKEN not set, cannot send admin notifications")
                 return
@@ -484,7 +541,7 @@ async def telegram_webhook(request: Request):
     Receive Telegram webhook updates.
 
     This is the main entry point for Telegram bot updates.
-    Set this as your webhook URL: https://your-server/webhook
+    Set this as your webhook URL: https://your-server/telegram/webhook
     """
     try:
         body = await request.json()
@@ -492,7 +549,8 @@ async def telegram_webhook(request: Request):
         
         # Extract tenant ID from the update (could be from chat ID, bot token, or custom field)
         # For now, we'll use a simple approach - you may want to customize this
-        tenant_id = request.headers.get("X-Tenant-ID", "default")
+        tenant_id = _tenant_id_from_request(request)
+        _verify_webhook_secret(request, tenant_id)
         
         logger.info(f"[{tenant_id}] Received Telegram update: {update.get('update_id')}")
         
@@ -518,10 +576,10 @@ async def telegram_webhook(request: Request):
 
 
 # Admin endpoints
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(require_telegram_admin)])
 async def get_status(request: Request):
     """Get protection service status for a tenant."""
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    tenant_id = _tenant_id_from_request(request)
     show_all = request.query_params.get("all", "false").lower() == "true"
     if show_all and tenant_id == "default":
         return service.get_status("all")
@@ -529,14 +587,15 @@ async def get_status(request: Request):
         return service.get_status(tenant_id)
 
 
-@router.post("/groups/{group_id}/protect")
-async def protect_group(group_id: int, admin_chat_id: int = None):
+@router.post("/groups/{group_id}/protect", dependencies=[Depends(require_telegram_admin)])
+async def protect_group(group_id: int, request: Request, admin_chat_id: int = None):
     """Register a group for protection."""
-    service.register_group(group_id, admin_chat_id)
-    return {"ok": True, "group_id": group_id, "status": "protected"}
+    tenant_id = _tenant_id_from_request(request)
+    service.register_group(group_id, admin_chat_id, tenant_id=tenant_id)
+    return {"ok": True, "tenant_id": tenant_id, "group_id": group_id, "status": "protected"}
 
 
-@router.get("/groups/{group_id}/members")
+@router.get("/groups/{group_id}/members", dependencies=[Depends(require_telegram_admin)])
 async def get_group_members(group_id: int):
     """Get member analysis for a group (for audit)."""
     # This would integrate with Telegram API to get all members
@@ -546,18 +605,18 @@ async def get_group_members(group_id: int):
     }
 
 
-@router.get("/reviews")
+@router.get("/reviews", dependencies=[Depends(require_telegram_admin)])
 async def get_all_reviews(request: Request):
     """Get all pending manual reviews for a tenant."""
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    tenant_id = _tenant_id_from_request(request)
     reviews = service.get_pending_reviews(tenant_id)
     return {"tenant_id": tenant_id, "pending_reviews": reviews, "count": len(reviews)}
 
 
-@router.get("/reviews/{review_id}")
+@router.get("/reviews/{review_id}", dependencies=[Depends(require_telegram_admin)])
 async def get_review_details(review_id: str, request: Request):
     """Get details of a specific manual review."""
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    tenant_id = _tenant_id_from_request(request)
     reviews = service.get_pending_reviews(tenant_id)
     review = next((r for r in reviews if r["review_id"] == review_id), None)
     if not review:
@@ -565,11 +624,10 @@ async def get_review_details(review_id: str, request: Request):
     return review
 
 
-@router.post("/reviews/{review_id}/resolve")
+@router.post("/reviews/{review_id}/resolve", dependencies=[Depends(require_telegram_admin)])
 async def resolve_review(review_id: str, resolution: Dict[str, Any], request: Request):
     """Resolve a manual review with admin decision."""
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
-    tenant_service = TelegramProtectionService(tenant_id=tenant_id)
+    tenant_id = _tenant_id_from_request(request)
     
     admin_decision = resolution.get("decision")  # "allow", "ban", "kick", "warn"
     admin_notes = resolution.get("notes", "")
@@ -577,7 +635,7 @@ async def resolve_review(review_id: str, resolution: Dict[str, Any], request: Re
     if not admin_decision:
         raise HTTPException(status_code=400, detail="Decision is required")
         
-    success = tenant_service.resolve_review(review_id, admin_decision, admin_notes, tenant_id)
+    success = service.resolve_review(review_id, admin_decision, admin_notes, tenant_id)
     
     if not success:
         raise HTTPException(status_code=404, detail="Review not found")
@@ -591,13 +649,12 @@ async def resolve_review(review_id: str, resolution: Dict[str, Any], request: Re
     }
 
 
-@router.post("/reviews/{review_id}/execute")
+@router.post("/reviews/{review_id}/execute", dependencies=[Depends(require_telegram_admin)])
 async def execute_review_decision(review_id: str, request: Request):
     """Execute the admin decision for a review."""
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
-    tenant_service = TelegramProtectionService(tenant_id=tenant_id)
+    tenant_id = _tenant_id_from_request(request)
     
-    reviews = tenant_service.get_pending_reviews(tenant_id)
+    reviews = service.get_pending_reviews(tenant_id)
     review = next((r for r in reviews if r["review_id"] == review_id), None)
     
     if not review:
@@ -606,7 +663,7 @@ async def execute_review_decision(review_id: str, request: Request):
     if review.get("status") != "resolved":
         raise HTTPException(status_code=400, detail="Review not yet resolved by admin")
         
-    result = await tenant_service.execute_review_decision(review_id)
+    result = await service.execute_review_decision(review_id, tenant_id)
     
     if result["status"] != "executed":
         raise HTTPException(status_code=500, detail=result.get("error", "Failed to execute decision"))
@@ -621,44 +678,40 @@ async def execute_review_decision(review_id: str, request: Request):
     }
 
 
-@router.get("/config")
+@router.get("/config", dependencies=[Depends(require_telegram_admin)])
 async def get_tenant_config(request: Request):
     """Get current tenant configuration."""
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
-    tenant_service = TelegramProtectionService(tenant_id=tenant_id)
+    tenant_id = _tenant_id_from_request(request)
+    service._ensure_tenant(tenant_id)
     
     return {
         "tenant_id": tenant_id,
-        "tenant_name": tenant_service.tenant_name,
-        "configuration": tenant_service.tenant_config,
-        "active_detectors": list(tenant_service.adapter.active_detectors.keys())
+        "tenant_name": os.environ.get(f"TENANT_NAME_{tenant_id.upper()}", tenant_id),
+        "configuration": service.tenant_configs[tenant_id],
+        "active_detectors": list(service.tenant_adapters[tenant_id].active_detectors.keys())
     }
 
 
-@router.post("/config/detectors")
+@router.post("/config/detectors", dependencies=[Depends(require_telegram_admin)])
 async def configure_detectors(request: Request, config: Dict[str, Any]):
     """Configure detectors for a tenant (admin only)."""
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
-    
-    # In production, add admin authentication here
-    # if not is_admin(request):
-    #     raise HTTPException(status_code=403, detail="Admin access required")
+    tenant_id = _tenant_id_from_request(request)
     
     # Validate configuration
     if not config or 'detectors' not in config:
         raise HTTPException(status_code=400, detail="Configuration must include 'detectors' section")
     
-    # Store configuration (in production, use database)
-    # For now, we'll return what would be saved
+    updated = service.update_tenant_config(tenant_id, config)
     return {
         "status": "success",
         "tenant_id": tenant_id,
-        "message": "Configuration would be saved to database",
-        "configuration": config
+        "message": "Configuration updated for this running service instance",
+        "configuration": updated,
+        "active_detectors": list(service.tenant_adapters[tenant_id].active_detectors.keys()),
     }
 
 
-@router.get("/config/options")
+@router.get("/config/options", dependencies=[Depends(require_telegram_admin)])
 async def get_configuration_options():
     """Get available configuration options."""
     return {
@@ -700,8 +753,8 @@ async def get_configuration_options():
     }
 
 
-@router.post("/groups/{group_id}/audit")
-async def run_audit(group_id: int):
+@router.post("/groups/{group_id}/audit", dependencies=[Depends(require_telegram_admin)])
+async def run_audit(group_id: int, request: Request):
     """
     Run a full audit of group members.
     
@@ -709,6 +762,7 @@ async def run_audit(group_id: int):
     """
     # Placeholder - would implement full audit logic
     return {
+        "tenant_id": _tenant_id_from_request(request),
         "group_id": group_id,
         "status": "audit_queued",
         "estimated_time": "5 minutes"

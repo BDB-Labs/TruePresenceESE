@@ -121,7 +121,9 @@ class TruePresenceDecisionEngine:
     def __init__(self, ensemble_runtime=None, artifact_store: Optional[ArtifactStore] = None):
         if ensemble_runtime is None:
             try:
-                from truepresence.ensemble.orchestrator import TruePresenceEnsembleRuntime
+                from truepresence.ensemble.orchestrator import (
+                    TruePresenceEnsembleRuntime,
+                )
             except Exception as exc:
                 if not allow_lenient_wiring():
                     raise ConfigurationError(

@@ -81,6 +81,10 @@ class EvaluateRequest(BaseModel):
     challenge_responses: Optional[List[ChallengeResponse]] = None
 
 
+class CreateSessionRequest(BaseModel):
+    assurance_level: str = "A1"
+
+
 # Response Models
 class RoleReasoning(BaseModel):
     """Reasoning trace for a role."""
@@ -109,16 +113,17 @@ class EvaluateResponse(BaseModel):
 
 
 @app.post("/session/create")
-def create_session(assurance_level: str = "A1"):
+def create_session(request: Optional[CreateSessionRequest] = None, assurance_level: Optional[str] = None):
     """Create a new session."""
+    resolved_assurance_level = assurance_level or (request.assurance_level if request else "A1")
     session_id = str(uuid.uuid4())
     session = Session(
         session_id=session_id,
         created_at=datetime.now(timezone.utc),
-        assurance_level=assurance_level,
+        assurance_level=resolved_assurance_level,
     )
     SESSIONS[session_id] = session
-    return {"session_id": session_id, "assurance_level": assurance_level}
+    return {"session_id": session_id, "assurance_level": resolved_assurance_level}
 
 
 @app.post("/v1/evaluate", response_model=EvaluateResponse)

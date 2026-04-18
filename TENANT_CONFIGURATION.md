@@ -60,11 +60,11 @@ Use the configuration API to adjust settings dynamically:
 
 ```bash
 # Get current configuration
-GET /config
+GET /telegram/config
 Headers: X-Tenant-ID: client1
 
 # Update configuration
-POST /config/detectors
+POST /telegram/config/detectors
 Headers: X-Tenant-ID: client1
 Body: {
   "detectors": {
@@ -220,14 +220,14 @@ CONFIG_LAST_UPDATED_CLIENT1=2024-01-15
 
 ```bash
 # Get available configuration options
-GET /config/options
+GET /telegram/config/options
 
 # Get current tenant configuration
-GET /config
+GET /telegram/config
 Headers: X-Tenant-ID: your_tenant
 
 # Validate configuration before applying
-POST /config/validate
+POST /telegram/config/detectors
 ```
 
 ## Advanced Configuration

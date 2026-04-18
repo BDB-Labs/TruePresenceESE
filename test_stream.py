@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Simple TruePresence test without server dependencies"""
 import sys
-sys.path.insert(0, '/Users/billp/Documents/GitHub/TruePresenceESE')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Test the streaming evaluator
 print("=== TruePresence Stream Evaluator Test ===\n")
 
-from truepresence.ese_stream import evaluate_incremental, rolling_window
-import json
+from truepresence.ese_stream import evaluate_incremental, rolling_window  # noqa: E402
 
 # Simulate a session with normal typing
 session_id = "test-session-001"
@@ -25,7 +26,7 @@ print(f"  Signals: liveness={result['signals']['liveness']:.2f}, ai_med={result[
 rolling_window.clear()
 
 print("\nTest 2: Simulate AI-mediated paste")
-for i in range(5):
+for _i in range(5):
     result = evaluate_incremental(session_id, {
         "event_type": "clipboard",
         "payload": {"pasted": True}

@@ -1,5 +1,10 @@
 import uuid
-from truepresence.redteam.attack_generator import generate_bot_session, generate_llm_user, generate_relay
+
+from truepresence.redteam.attack_generator import (
+    generate_bot_session,
+    generate_llm_user,
+    generate_relay,
+)
 from truepresence.redteam.evaluate import run_attack
 
 

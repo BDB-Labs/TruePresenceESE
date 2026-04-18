@@ -5,6 +5,7 @@ from truepresence.core.roles.base import (
     RelayRole,
     SynthesizerRole,
 )
+
 from .role_input import RoleInput
 
 __all__ = [

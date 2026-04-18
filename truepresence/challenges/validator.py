@@ -1,6 +1,7 @@
-import uuid
 import time
-from typing import Dict, Any, Optional
+import uuid
+from typing import Any, Dict
+
 
 class ChallengeValidator:
     """

@@ -6,8 +6,9 @@ computing variance across opinions as a disagreement signal and deriving
 confidence scores inversely proportional to variance.
 """
 
+from typing import Any, Dict
+
 import numpy as np
-from typing import Dict, Any, List
 
 
 class AgentCouncil:
@@ -51,7 +52,7 @@ class AgentCouncil:
         opinions = []
         agent_results = {}
         
-        for agent_name, agent in zip(self.agent_names, self.agents):
+        for agent_name, agent in zip(self.agent_names, self.agents, strict=False):
             try:
                 result = agent.evaluate(evidence, session)
                 # Extract probability or score from agent result

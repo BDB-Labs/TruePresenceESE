@@ -1,10 +1,16 @@
-import yaml
 from pathlib import Path
-from typing import Dict, Any, List
-from truepresence.core.events import Event
+from typing import Any, Dict, List
+
+import yaml
+
 from truepresence.adapter.evidence_adapter import EvidenceAdapter
+from truepresence.core.events import Event
 from truepresence.core.roles.base import (
-    LivenessRole, RelayRole, MediationRole, AdversarialRole, SynthesizerRole
+    AdversarialRole,
+    LivenessRole,
+    MediationRole,
+    RelayRole,
+    SynthesizerRole,
 )
 
 # Default config path anchored to the repo root, not the process cwd

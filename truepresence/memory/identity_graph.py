@@ -6,12 +6,13 @@ that connects similar sessions, enabling bot clustering and detection
 across multiple sessions.
 """
 
-import numpy as np
-from typing import Dict, Any, List, Set, Optional
-from collections import defaultdict
 import hashlib
 import hmac
 import os
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Set
+
+import numpy as np
 
 
 class IdentityGraph:

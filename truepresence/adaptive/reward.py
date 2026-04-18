@@ -5,7 +5,8 @@ This module provides a reward engine that updates weights based on detection fee
 enabling the system to learn from its performance and improve over time.
 """
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 import numpy as np
 
 

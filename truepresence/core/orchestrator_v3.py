@@ -18,7 +18,11 @@ from truepresence.evidence import (
     EvidencePacket,
     EvidencePacketBuilder,
 )
-from truepresence.exceptions import ConfigurationError, OrchestratorError, wrap_role_error
+from truepresence.exceptions import (
+    ConfigurationError,
+    OrchestratorError,
+    wrap_role_error,
+)
 from truepresence.memory.identity_graph import IdentityGraph
 from truepresence.memory.session_timeline import SessionTimeline
 from truepresence.runtime.distributed import DistributedRuntime

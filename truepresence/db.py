@@ -5,9 +5,10 @@ PostgreSQL connection and schema management.
 DATABASE_URL is injected automatically by Railway when Postgres is added.
 """
 
-import os
 import logging
+import os
 from contextlib import contextmanager
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,10 @@ def _build_database_url() -> str:
     database = os.environ.get("PGDATABASE") or os.environ.get("POSTGRES_DB")
 
     if all([host, user, password, database]):
-        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+        safe_user = quote(user, safe="")
+        safe_password = quote(password, safe="")
+        safe_database = quote(database, safe="")
+        return f"postgresql://{safe_user}:{safe_password}@{host}:{port}/{safe_database}"
 
     raise RuntimeError(
         "No database connection info found. Set DATABASE_URL or "
