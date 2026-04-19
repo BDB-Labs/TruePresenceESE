@@ -8,6 +8,8 @@ distributed deployment support.
 
 import logging
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 
 from truepresence.adaptive.weighting import AdaptiveWeights
@@ -79,6 +81,7 @@ class TruePresenceOrchestratorV3:
 
         # Initialize roles
         self.roles = {}
+        self._executor = ThreadPoolExecutor(max_workers=10)
         self._initialize_roles()
         
     def _initialize_roles(self):
@@ -229,15 +232,21 @@ class TruePresenceOrchestratorV3:
             argument_graph=argument_graph,
         )
         
-        # Run all roles
+        # Run roles in parallel using ThreadPoolExecutor
         role_outputs = {}
+        futures = {}
+        
         for role_name, role in self.roles.items():
             if role_name != "synthesizer":
-                try:
-                    role_outputs[role_name] = role.evaluate(evidence, session)
-                except Exception as e:
-                    logger.error(f"Role {role_name} FAILED during evaluate: {e}", exc_info=True)
-                    raise wrap_role_error(role_name, "evaluate", e) from e
+                futures[self._executor.submit(role.evaluate, evidence, session)] = role_name
+
+        for future in futures:
+            role_name = futures[future]
+            try:
+                role_outputs[role_name] = future.result()
+            except Exception as e:
+                logger.error(f"Role {role_name} FAILED during evaluate: {e}", exc_info=True)
+                raise wrap_role_error(role_name, "evaluate", e) from e
         
         # Run agent council for structured debate
         council_result = self.council.evaluate(evidence, session)

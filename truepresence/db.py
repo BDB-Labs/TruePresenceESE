@@ -46,14 +46,28 @@ DATABASE_URL = _build_database_url() if any(
 ) else None
 
 
+from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.extras import RealDictCursor
+
+# Global pool instance
+_pool = None
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        url = _build_database_url()
+        _pool = ThreadedConnectionPool(
+            minconn=1,
+            maxconn=20,
+            dsn=url,
+            cursor_factory=RealDictCursor
+        )
+        logger.info("Database connection pool initialized (min=1, max=20)")
+    return _pool
+
 def get_connection():
-    """Get a raw psycopg2 connection."""
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-
-    url = _build_database_url()
-    return psycopg2.connect(url, cursor_factory=RealDictCursor)
-
+    """Get a connection from the pool."""
+    return _get_pool().getconn()
 
 @contextmanager
 def get_db():
@@ -66,7 +80,7 @@ def get_db():
         conn.rollback()
         raise
     finally:
-        conn.close()
+        _get_pool().putconn(conn)
 
 
 def init_db():

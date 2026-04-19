@@ -16,6 +16,9 @@ from truepresence.core.runtime import (
 from truepresence.core.session import Session
 from truepresence.exceptions import TruePresenceError
 
+from truepresence.core.runtime import orchestrator
+from truepresence.core.session import Session
+
 # Configure logging - CRITICAL systems must log
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +27,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TruePresence ESE API", version="1.0.0")
-SESSIONS = {}
+
+# Sessions are now managed by the distributed runtime (Redis)
+# removed: SESSIONS = {}
+
 
 
 # Exception handlers - CRITICAL: System does NOT fail silently
@@ -122,7 +128,13 @@ def create_session(request: Optional[CreateSessionRequest] = None, assurance_lev
         created_at=datetime.now(timezone.utc),
         assurance_level=resolved_assurance_level,
     )
-    SESSIONS[session_id] = session
+    
+    # Store session in distributed runtime (Redis)
+    if orchestrator.distributed and orchestrator.distributed.available:
+        orchestrator.distributed.update_session_field(
+            session_id, "session_meta", session.model_dump()
+        )
+    
     return {"session_id": session_id, "assurance_level": resolved_assurance_level}
 
 
@@ -148,15 +160,22 @@ def evaluate(request: EvaluateRequest):
     - temporal_signals: Drift and cross-session risk
     """
     # Get or create session
-    session = SESSIONS.get(request.session_id)
-    if not session:
+    session_data = None
+    if orchestrator.distributed and orchestrator.distributed.available:
+        session_data = orchestrator.distributed.get_session_field(request.session_id, "session_meta")
+
+    if not session_data:
         # Create new session if doesn't exist
         session = Session(
             session_id=request.session_id,
             created_at=datetime.now(timezone.utc),
             assurance_level="A1"
         )
-        SESSIONS[request.session_id] = session
+        if orchestrator.distributed and orchestrator.distributed.available:
+            orchestrator.distributed.update_session_field(
+                request.session_id, "session_meta", session.model_dump()
+            )
+        session_data = session.model_dump()
     
     # Build event dict from request
     event_dict = {
@@ -190,6 +209,7 @@ def evaluate(request: EvaluateRequest):
             "session_id": request.session_id,
             "mode": request.mode,
             "tenant_id": (request.context or {}).get("tenant_id", "default"),
+            **(session_data or {}),
             **(request.context or {}),
         },
         event=event_dict,
