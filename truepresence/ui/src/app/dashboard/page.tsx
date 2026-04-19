@@ -19,9 +19,14 @@ export default function DashboardPage() {
               Dashboard
             </h1>
           </div>
-          <Link className="btn-secondary" href="/dashboard/login">
-            Switch account
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link className="btn-primary" href="/dashboard/admin">
+              Admin console
+            </Link>
+            <Link className="btn-secondary" href="/dashboard/login">
+              Switch account
+            </Link>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">

@@ -1,18 +1,12 @@
 import { NextResponse } from "next/server";
 
+import { apiBaseUrl } from "../../_lib/backend";
+
 interface LoginPayload {
   access_token?: string;
   token_type?: string;
   user?: unknown;
   detail?: string;
-}
-
-function apiBaseUrl() {
-  return (
-    process.env.TRUEPRESENCE_API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "https://verify.bageltech.net"
-  ).replace(/\/$/, "");
 }
 
 export async function POST(request: Request) {
