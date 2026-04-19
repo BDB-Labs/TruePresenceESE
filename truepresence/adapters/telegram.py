@@ -376,29 +376,25 @@ class TelegramAdapter:
     def _estimate_account_age(self, user: Dict[str, Any]) -> int:
         """
         Estimate account age in days from Telegram user ID.
-
-        Telegram user IDs are roughly sequential and monotonically increasing.
-        We can estimate registration era from known ID ranges:
-          < 100_000        : 2013 era (~4000+ days ago)
-          < 10_000_000     : 2014-2016 (~2500-3500 days)
-          < 100_000_000    : 2016-2018 (~1500-2500 days)
-          < 1_000_000_000  : 2018-2021 (~500-1500 days)
-          >= 1_000_000_000 : 2021+     (~0-500 days, treat as new)
-        Returns a rough midpoint estimate. Not exact but far better than always 30.
+        Uses updated 2024/2025 ID ranges.
         """
         user_id = user.get("id", 0) if isinstance(user, dict) else 0
         if not user_id:
             return 30
         if user_id < 100_000:
-            return 4000
+            return 4500
         elif user_id < 10_000_000:
-            return 3000
+            return 3500
         elif user_id < 100_000_000:
-            return 2000
+            return 2500
+        elif user_id < 500_000_000:
+            return 1200
         elif user_id < 1_000_000_000:
-            return 900
+            return 600
+        elif user_id < 5_000_000_000:
+            return 180
         else:
-            return 120  # Likely recent account — treat as higher risk
+            return 30  # Very new account
 
     def _calc_content_similarity(self, user_id: str, text: str) -> float:
         """
@@ -455,14 +451,7 @@ class TelegramAdapter:
     def build_response(self, evaluation_result: Dict[str, Any], tenant_id: str = None, user_id: int = None) -> Dict[str, Any]:
         """
         Convert TruePresence result to Telegram action.
-
-        Args:
-            evaluation_result: Result from orchestrator.evaluate()
-            tenant_id: Optional tenant identifier for context
-            user_id: Optional user identifier for rate limiting
-
-        Returns:
-            Action dictionary for Telegram bot to execute
+        Maps removal factors (reason_codes/threat_categories) to specific enforcement actions.
         """
         import time as time_module
         current_time = time_module.time()
@@ -471,7 +460,6 @@ class TelegramAdapter:
         if user_id is not None:
             last_ban_time = _ban_actions.get(user_id, 0)
             if current_time - last_ban_time < BAN_COOLDOWN_SECONDS:
-                # Rate limited - downgrade to alert instead of immediate ban
                 logger.info(f"Rate-limited ban for user {user_id}, downgrading to alert")
                 return {
                     "action": "alert_admin",
@@ -480,6 +468,125 @@ class TelegramAdapter:
                     "tenant_id": tenant_id,
                     "rate_limited": True
                 }
+        
+        state = evaluation_result.get("state")
+        decision = evaluation_result.get("decision", "allow")
+        confidence = evaluation_result.get("confidence", 0.0)
+        human_prob = evaluation_result.get("human_probability", 0.5)
+        threat_categories = evaluation_result.get("threat_categories", [])
+        reason_codes = evaluation_result.get("reason_codes", [])
+        block_reason = evaluation_result.get("block_reason", "")
+
+        # Removal Workflow Logic: Map determination factors to actions
+        critical_factors = {'child_exploitation', 'illegal_content'}
+        policy_factors = {'copyright_violation', 'torrent_sharing', 'crypto_mining', 'remote_access'}
+        
+        # 1. Critical Security Violations -> Immediate Ban
+        if any(cat in critical_factors for cat in threat_categories) or any(code in critical_factors for code in reason_codes):
+            if user_id is not None:
+                _ban_actions[user_id] = current_time
+            return {
+                "action": "ban",
+                "reason": f"CRITICAL SECURITY VIOLATION: {block_reason or 'Illegal content detected'}",
+                "confidence": confidence,
+                "threat_categories": threat_categories,
+                "tenant_id": tenant_id,
+            }
+
+        # 2. Policy Violations -> Ban if high confidence, else Kick/Warn
+        if any(cat in policy_factors for cat in threat_categories) or any(code in policy_factors for code in reason_codes):
+            if confidence > 0.8:
+                if user_id is not None:
+                    _ban_actions[user_id] = current_time
+                return {
+                    "action": "ban",
+                    "reason": f"Policy Violation: {block_reason or 'Repeated policy breach'}",
+                    "confidence": confidence,
+                    "threat_categories": threat_categories,
+                    "tenant_id": tenant_id,
+                }
+            elif confidence > 0.5:
+                return {
+                    "action": "kick",
+                    "reason": f"Policy Warning: {block_reason or 'Suspicious activity'}",
+                    "confidence": confidence,
+                    "threat_categories": threat_categories,
+                    "tenant_id": tenant_id,
+                }
+
+        # 3. Engine State-based Enforcement
+        if state == "EJECT":
+            if user_id is not None:
+                _ban_actions[user_id] = current_time
+            return {
+                "action": "ban",
+                "reason": block_reason or "Deterministic policy violation",
+                "confidence": confidence,
+                "threat_categories": threat_categories,
+                "tenant_id": tenant_id,
+            }
+        if state == "RESTRICT":
+            return {
+                "action": "kick",
+                "reason": block_reason or "Restricted pending further review",
+                "confidence": confidence,
+                "threat_categories": threat_categories,
+                "tenant_id": tenant_id,
+            }
+        if state == "STEP_UP_AUTH":
+            return {
+                "action": "challenge",
+                "reason": "Additional verification required",
+                "confidence": confidence,
+                "tenant_id": tenant_id,
+            }
+        if state == "OBSERVE":
+            return {
+                "action": "allow",
+                "reason": "Allowed with monitoring",
+                "confidence": confidence,
+                "tenant_id": tenant_id,
+                "monitor": True,
+            }
+        
+        # 4. General Bot Detection
+        if decision == "block" and confidence > 0.8:
+            if user_id is not None:
+                _ban_actions[user_id] = current_time
+            return {
+                "action": "ban",
+                "reason": block_reason or f"Bot detected ({human_prob:.0%} human probability)",
+                "confidence": confidence,
+                "tenant_id": tenant_id
+            }
+        elif decision == "block" and confidence > 0.6:
+            return {
+                "action": "kick",
+                "reason": block_reason or f"Suspicious ({human_prob:.0%} human probability)",
+                "confidence": confidence,
+                "tenant_id": tenant_id
+            }
+        elif decision == "challenge":
+            return {
+                "action": "challenge",
+                "reason": "Verification required",
+                "confidence": confidence,
+                "tenant_id": tenant_id
+            }
+        elif decision == "review":
+            return {
+                "action": "alert_admin",
+                "reason": f"Review needed - {evaluation_result.get('risk_factors', [])}",
+                "confidence": confidence,
+                "tenant_id": tenant_id
+            }
+        
+        return {
+            "action": "allow",
+            "confidence": confidence,
+            "tenant_id": tenant_id
+        }
+
         
         state = evaluation_result.get("state")
         decision = evaluation_result.get("decision", "allow")

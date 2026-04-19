@@ -26,7 +26,8 @@ from truepresence.core.runtime import (
 from truepresence.core.runtime import (
     orchestrator as shared_orchestrator,
 )
-from truepresence.exceptions import TruePresenceError
+from truepresence.db import get_db
+
 from truepresence.surfaces.telegram.adapter import TelegramGuardAdapter
 
 # Configure logging - CRITICAL systems must log
@@ -88,14 +89,11 @@ class TelegramProtectionService:
         self.tenant_adapters: Dict[str, TelegramAdapter] = {tenant_id: self.adapter}
         self.tenant_guard_adapters: Dict[str, TelegramGuardAdapter] = {tenant_id: self.guard_adapter}
         
-        # Multi-tenant data structures
-        self.admin_chats: Dict[str, set] = {tenant_id: set()}
-        self.protected_groups: Dict[str, set] = {tenant_id: set()}
-        self.user_sessions: Dict[str, Dict[str, Any]] = {tenant_id: {}}
-        self.pending_reviews: Dict[str, Dict[str, Dict[str, Any]]] = {tenant_id: {}}
+        # Multi-tenant data is now handled via Database (TruePresence DB)
+        self.user_sessions: Dict[str, Dict[str, Any]] = {} # Transient cache for active requests
         
         # Tenant-specific configuration
-        self.bot_token = os.environ.get(f"TELEGRAM_BOT_TOKEN_{tenant_id.upper()}") or os.environ.get("TELEGRAM_BOT_TOKEN")
+        self.bot_token = self._bot_token_for_tenant(tenant_id)
         self.http_client = httpx.AsyncClient()
         
         # Tenant metadata
@@ -103,17 +101,20 @@ class TelegramProtectionService:
         self.tenant_created = datetime.now(timezone.utc).isoformat()
 
     def _bot_token_for_tenant(self, tenant_id: str) -> str | None:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT bot_token FROM telegram_bot_tokens WHERE tenant_id = %s", 
+                    (tenant_id,)
+                )
+                row = cur.fetchone()
+                if row:
+                    return row["bot_token"]
+        
+        # Fallback to env vars for legacy support
         return os.environ.get(f"TELEGRAM_BOT_TOKEN_{tenant_id.upper()}") or os.environ.get("TELEGRAM_BOT_TOKEN")
 
     def _ensure_tenant(self, tenant_id: str) -> None:
-        if tenant_id not in self.admin_chats:
-            self.admin_chats[tenant_id] = set()
-        if tenant_id not in self.protected_groups:
-            self.protected_groups[tenant_id] = set()
-        if tenant_id not in self.user_sessions:
-            self.user_sessions[tenant_id] = {}
-        if tenant_id not in self.pending_reviews:
-            self.pending_reviews[tenant_id] = {}
         if tenant_id not in self.tenant_configs:
             self.tenant_configs[tenant_id] = self._load_tenant_config(tenant_id)
         if tenant_id not in self.tenant_adapters:
@@ -188,16 +189,84 @@ class TelegramProtectionService:
         logger.info(f"Loaded configuration for tenant {tenant_id}: {config}")
         return config
     
+    async def _execute_action(self, action: Dict[str, Any], update: Dict[str, Any], tenant_id: str, decision_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute the determined Telegram action via Bot API and log the outcome to ESE.
+        """
+        bot_token = self._bot_token_for_tenant(tenant_id)
+        if not bot_token:
+            return {"status": "failed", "error": "Telegram bot token not configured"}
+
+        action_type = action.get("action")
+        if action_type == "allow":
+            return {"status": "executed", "action": "allow"}
+
+        # Extract necessary IDs from update
+        message = update.get("message") or update.get("edited_message", {})
+        chat_id = message.get("chat", {}).get("id")
+        user_id = message.get("from", {}).get("id")
+        message_id = message.get("message_id")
+
+        if not chat_id or not user_id:
+            return {"status": "failed", "error": "Missing chat or user ID in update"}
+
+        # Map action to API endpoint and payload
+        if action_type == "ban":
+            url = f"https://api.telegram.org/bot{bot_token}/banChatMember"
+            payload = {"chat_id": chat_id, "user_id": user_id}
+        elif action_type == "kick":
+            url = f"https://api.telegram.org/bot{bot_token}/banChatMember"
+            payload = {
+                "chat_id": chat_id, 
+                "user_id": user_id, 
+                "until_date": int(datetime.now(timezone.utc).timestamp()) + 60
+            }
+        elif action_type == "warn":
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": "⚠️ Warning: Your message violated group rules.",
+                "reply_to_message_id": message_id
+            }
+        elif action_type == "challenge":
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": "🛡️ Verification Required: Please complete the challenge to continue posting.",
+                "reply_to_message_id": message_id
+            }
+        else:
+            return {"status": "skipped", "action": action_type}
+
+        try:
+            response = await self.http_client.post(url, json=payload)
+            success = response.status_code == 200
+            outcome = {
+                "status": "success" if success else "failed",
+                "action": action_type,
+                "response_code": response.status_code,
+                "response_text": response.text if not success else "OK",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "evidence_packet_id": decision_result.get("evidence_packet", {}).get("packet_id"),
+                "trace_id": decision_result.get("decision_trace_id")
+            }
+            
+            # Log outcome back to ESE Distributed Runtime
+            if hasattr(self.orchestrator, "legacy_orchestrator"):
+                dist = getattr(self.orchestrator.legacy_orchestrator, "distributed", None)
+                if dist and dist.available:
+                    session_id = f"tg_{tenant_id}_{user_id}"
+                    dist.update_session_field(session_id, "enforcement_outcome", outcome)
+                    logger.info(f"[{tenant_id}] Evidence loop closed: Outcome logged for {session_id}")
+
+            return outcome
+        except Exception as e:
+            logger.error(f"Execution failed: {e}", exc_info=True)
+            return {"status": "error", "error": str(e)}
+
     async def process_update(self, update: Dict[str, Any], tenant_id: str = None) -> Optional[Dict[str, Any]]:
         """
         Process a Telegram update through TruePresence.
-
-        Args:
-            update: Raw Telegram webhook update
-            tenant_id: Tenant identifier for multi-tenancy support
-
-        Returns:
-            Action to take or None
         """
         tenant_id = tenant_id or self.tenant_id
         self._ensure_tenant(tenant_id)
@@ -218,10 +287,22 @@ class TelegramProtectionService:
             user_id = event["context"].get("user_id", "unknown")
             session_id = f"tg_{tenant_id}_{user_id}"
             
-            if session_id not in self.user_sessions[tenant_id]:
-                self.user_sessions[tenant_id][session_id] = {"session_id": session_id, "tenant_id": tenant_id}
-            
-            session = self.user_sessions[tenant_id][session_id]
+            # Load session from DB
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT data FROM telegram_user_sessions WHERE session_id = %s", 
+                        (session_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        session = json.loads(row["data"])
+                    else:
+                        session = {"session_id": session_id, "tenant_id": tenant_id}
+                        cur.execute(
+                            "INSERT INTO telegram_user_sessions (session_id, tenant_id, data) VALUES (%s, %s, %s)",
+                            (session_id, tenant_id, json.dumps(session))
+                        )
             
             # Evaluate with TruePresence
             decision_result = guard_adapter.evaluate_event(
@@ -230,7 +311,8 @@ class TelegramProtectionService:
                 event=event,
                 context={"session": session},
             )
-            result = decision_result.to_response()
+            # Note: DecisionResult.to_response() provides the dictionary we need
+            result_dict = decision_result.to_response()
             
             # Convert to Telegram action
             action = guard_adapter.enforce(decision_result.decision)
@@ -239,14 +321,28 @@ class TelegramProtectionService:
             
             # Add full result context for debugging
             action["evaluation"] = {
-                "human_probability": result["final"].get("human_probability"),
-                "risk_factors": result["final"].get("risk_factors", []),
-                "reason_codes": result["final"].get("reason_codes", []),
+                "human_probability": result_dict["final"].get("human_probability"),
+                "risk_factors": result_dict["final"].get("risk_factors", []),
+                "reason_codes": result_dict["final"].get("reason_codes", []),
             }
+
+            # EXECUTE the action - This makes the bot the terminating process
+            execution_outcome = await self._execute_action(action, update, tenant_id, result_dict)
+            action["execution"] = execution_outcome
             
+            # Update session data in DB
+            session["last_event_type"] = event["event_type"]
+            session["last_event_timestamp"] = event["timestamp"]
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE telegram_user_sessions SET data = %s, updated_at = NOW() WHERE session_id = %s",
+                        (json.dumps(session), session_id)
+                    )
+
             # Handle manual review cases
             if action.get("action") == "alert_admin":
-                await self._handle_manual_review(action, update, result, tenant_id)
+                await self._handle_manual_review(action, update, result_dict, tenant_id)
             
             return action
             
@@ -256,34 +352,60 @@ class TelegramProtectionService:
         except Exception as e:
             logger.critical(f"[{tenant_id}] UNHANDLED ERROR: {e}", exc_info=True)
             raise
+
+        except Exception as e:
+            logger.critical(f"[{tenant_id}] UNHANDLED ERROR: {e}", exc_info=True)
+            raise
     
     def register_group(self, group_id: int, admin_chat_id: int = None, tenant_id: str = None):
         """Register a group for protection."""
         tenant_id = tenant_id or self.tenant_id
         self._ensure_tenant(tenant_id)
         
-        self.protected_groups[tenant_id].add(group_id)
-        if admin_chat_id:
-            self.admin_chats[tenant_id].add(admin_chat_id)
-        logger.info(f"[{tenant_id}] Registered group {group_id} for protection")
-    
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO telegram_protected_groups (group_id, tenant_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                    (group_id, tenant_id)
+                )
+                if admin_chat_id:
+                    cur.execute(
+                        "INSERT INTO telegram_admin_chats (chat_id, tenant_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        (admin_chat_id, tenant_id)
+                    )
+        logger.info(f"[{tenant_id}] Registered group {group_id} for protection in DB")
+
     def get_status(self, tenant_id: str = None) -> Dict[str, Any]:
         """Get service status for a tenant or all tenants."""
         tenant_id = tenant_id or self.tenant_id
-        if tenant_id != "all":
-            self._ensure_tenant(tenant_id)
         
+        orch_type = "Unknown"
+        if hasattr(self.orchestrator, '__class__'):
+            orch_type = self.orchestrator.__class__.__name__
+
         if tenant_id == "all":
-            # Return status for all tenants
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT DISTINCT tenant_id FROM telegram_protected_groups")
+                    tenants = [r["tenant_id"] for r in cur.fetchall()]
+            
             tenant_statuses = {}
-            for tid in self.user_sessions.keys():
-                orch_type = "Unknown"
-                if hasattr(self.orchestrator, '__class__'):
-                    orch_type = self.orchestrator.__class__.__name__
+            for tid in tenants:
+                with get_db() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT COUNT(*) as count FROM telegram_protected_groups WHERE tenant_id = %s", (tid,))
+                        groups_count = cur.fetchone()["count"]
+                        
+                        cur.execute("SELECT COUNT(*) as count FROM telegram_user_sessions WHERE tenant_id = %s", (tid,))
+                        sessions_count = cur.fetchone()["count"]
+                        
+                        cur.execute("SELECT COUNT(*) as count FROM telegram_pending_reviews WHERE tenant_id = %s AND status = 'pending'", (tid,))
+                        reviews_count = cur.fetchone()["count"]
+                
                 tenant_statuses[tid] = {
-                    "protected_groups": len(self.protected_groups.get(tid, set())),
-                    "active_sessions": len(self.user_sessions.get(tid, {})),
-                    "pending_reviews": len(self.pending_reviews.get(tid, {})),
+                    "protected_groups": groups_count,
+                    "active_sessions": sessions_count,
+                    "pending_reviews": reviews_count,
                     "orchestrator_type": orch_type
                 }
             
@@ -294,19 +416,26 @@ class TelegramProtectionService:
                 "total_tenants": len(tenant_statuses)
             }
         else:
-            # Return status for specific tenant - with explicit safe access
-            orch_type = "Unknown"
-            if hasattr(self.orchestrator, '__class__'):
-                orch_type = self.orchestrator.__class__.__name__
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) as count FROM telegram_protected_groups WHERE tenant_id = %s", (tenant_id,))
+                    groups_count = cur.fetchone()["count"]
+                    
+                    cur.execute("SELECT COUNT(*) as count FROM telegram_user_sessions WHERE tenant_id = %s", (tenant_id,))
+                    sessions_count = cur.fetchone()["count"]
+                    
+                    cur.execute("SELECT COUNT(*) as count FROM telegram_pending_reviews WHERE tenant_id = %s AND status = 'pending'", (tenant_id,))
+                    reviews_count = cur.fetchone()["count"]
             
             return {
                 "status": "healthy",
                 "tenant_id": tenant_id,
-                "protected_groups": len(self.protected_groups.get(tenant_id, set())),
-                "active_sessions": len(self.user_sessions.get(tenant_id, {})),
-                "pending_reviews": len(self.pending_reviews.get(tenant_id, {})),
+                "protected_groups": groups_count,
+                "active_sessions": sessions_count,
+                "pending_reviews": reviews_count,
                 "orchestrator_type": orch_type
             }
+
 
     def add_pending_review(self, review_data: Dict[str, Any], tenant_id: str = None):
         """Add a case that requires manual review."""
@@ -319,39 +448,69 @@ class TelegramProtectionService:
         review_data["created_at"] = datetime.now(timezone.utc).isoformat()
         review_data["tenant_id"] = tenant_id
         
-        self.pending_reviews[tenant_id][review_id] = review_data
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO telegram_pending_reviews (review_id, tenant_id, data, status, created_at) VALUES (%s, %s, %s, %s, %s)",
+                    (review_id, tenant_id, json.dumps(review_data), "pending", review_data["created_at"])
+                )
         return review_id
 
     def get_pending_reviews(self, tenant_id: str = None) -> List[Dict[str, Any]]:
         """Get all pending manual reviews for a tenant."""
         tenant_id = tenant_id or self.tenant_id
-        return list(self.pending_reviews.get(tenant_id, {}).values())
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT data FROM telegram_pending_reviews WHERE tenant_id = %s AND status = 'pending'",
+                    (tenant_id,)
+                )
+                rows = cur.fetchall()
+                return [json.loads(r["data"]) for r in rows]
 
     def resolve_review(self, review_id: str, admin_decision: str, admin_notes: str = "", tenant_id: str = None) -> bool:
         """Resolve a pending review with admin decision."""
         tenant_id = tenant_id or self.tenant_id
         self._ensure_tenant(tenant_id)
         
-        if tenant_id not in self.pending_reviews or review_id not in self.pending_reviews[tenant_id]:
-            return False
-            
-        review = self.pending_reviews[tenant_id][review_id]
-        review["status"] = "resolved"
-        review["admin_decision"] = admin_decision
-        review["admin_notes"] = admin_notes
-        review["resolved_at"] = datetime.now(timezone.utc).isoformat()
-        
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT data FROM telegram_pending_reviews WHERE review_id = %s AND tenant_id = %s",
+                    (review_id, tenant_id)
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False
+                
+                review = json.loads(row["data"])
+                review["status"] = "resolved"
+                review["admin_decision"] = admin_decision
+                review["admin_notes"] = admin_notes
+                review["resolved_at"] = datetime.now(timezone.utc).isoformat()
+                
+                cur.execute(
+                    "UPDATE telegram_pending_reviews SET data = %s, status = 'resolved' WHERE review_id = %s",
+                    (json.dumps(review), review_id)
+                )
         return True
 
     async def execute_review_decision(self, review_id: str, tenant_id: str = None):
         """Execute the admin decision for a review."""
         tenant_id = tenant_id or self.tenant_id
-        tenant_reviews = self.pending_reviews.get(tenant_id, {})
         
-        if review_id not in tenant_reviews:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT data FROM telegram_pending_reviews WHERE review_id = %s AND tenant_id = %s",
+                    (review_id, tenant_id)
+                )
+                row = cur.fetchone()
+        
+        if not row:
             return {"status": "failed", "error": "Review not found"}
             
-        review = tenant_reviews[review_id]
+        review = json.loads(row["data"])
         
         if review.get("status") != "resolved":
             return {"status": "failed", "error": "Review not yet resolved by admin"}

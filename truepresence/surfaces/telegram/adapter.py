@@ -48,6 +48,7 @@ class TelegramGuardAdapter:
                 "human_probability": decision.human_probability,
                 "reason_codes": list(decision.reason_codes),
                 "risk_factors": list(decision.reason_codes),
+                "threat_categories": list(decision.reason_codes),
             },
             tenant_id=decision.tenant_id,
         )

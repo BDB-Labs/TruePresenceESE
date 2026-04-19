@@ -88,7 +88,7 @@ def init_db():
     Initialize database schema.
     Creates tables if they don't exist — safe to run on every startup.
     """
-    schema = """
+    schema = \"\"\"
     CREATE TABLE IF NOT EXISTS users (
         id          SERIAL PRIMARY KEY,
         email       VARCHAR(255) UNIQUE NOT NULL,
@@ -101,10 +101,52 @@ def init_db():
         last_login  TIMESTAMPTZ
     );
 
+    CREATE TABLE IF NOT EXISTS user_warnings (
+        id          SERIAL PRIMARY KEY,
+        user_id     BIGINT NOT NULL,
+        tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
+        reason      TEXT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_bot_tokens (
+        bot_token   TEXT PRIMARY KEY,
+        tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default'
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_protected_groups (
+        group_id    BIGINT NOT NULL,
+        tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
+        PRIMARY KEY (group_id, tenant_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_admin_chats (
+        chat_id     BIGINT NOT NULL,
+        tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
+        PRIMARY KEY (chat_id, tenant_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_user_sessions (
+        session_id  VARCHAR(255) PRIMARY KEY,
+        tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
+        data        JSONB,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_pending_reviews (
+        review_id   VARCHAR(255) PRIMARY KEY,
+        tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
+        data        JSONB,
+        status      VARCHAR(50) NOT NULL DEFAULT 'pending',
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_users_email     ON users(email);
     CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_users_role      ON users(role);
-    """
+    CREATE INDEX IF NOT EXISTS idx_warns_user_tenant ON user_warnings(user_id, tenant_id);
+    \"\"\"
+
 
     with get_db() as conn:
         with conn.cursor() as cur:
