@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from truepresence.db import get_db
 from truepresence.exceptions import EvidenceError
+from truepresence.adapters.telegram_models import TelegramEvent
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +40,20 @@ class TelegramAdapter:
             'patterns': [
                 r'\bchild.*porn\b',
                 r'\bkiddie.*porn\b',
-                r'\bcp\b(?!\s*(?:certificate|panel|apache|copyright))',
-                r'\blolita\b(?!\s*(?:book|novel|nabokov))',
-                r'\bpedo\b(?!\s*(?:bear|file|meter))',
+                r'\bcp\b(?!\s*(?:certificate|panel|apache|copyright|cpu|cpus|center|connection))',
+                r'\blolita\b(?!\s*(?:book|novel|nabokov|fashion))',
+                r'\bpedo\b(?!\s*(?:bear|file|meter|pedometry))',
             ]
         },
         'illegal_content': {
             'enabled': True,  # Always enabled
             'configurable': False,
             'patterns': [
-                r'buy.*drugs',
-                r'fake.*id', 
-                r'carding',
-                r'hacking.*service',
-                r'weapon.*sale',
+                r'\b(buy|purchase|order|get)\s+.*\b(drugs|narcotics|opioids|cocaine|heroin|meth)\b',
+                r'\b(fake|forged|counterfeit)\s+.*\b(id|passport|drivers\s+license|credit\s+card)\b',
+                r'\bcarding\b',
+                r'\bhacking\s+.*(service|tool|tutorial)\b',
+                r'\b(weapon|firearm|gun)\s+.*(sale|buy|purchase)\b',
             ]
         }
     }
@@ -172,28 +173,24 @@ class TelegramAdapter:
                     re.I
                 )
         
-    def parse_update(self, update: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def parse_update(self, update: Dict[str, Any]) -> Optional[TelegramEvent]:
         """
         Parse Telegram update into TruePresence event.
-        
-        Args:
-            update: Telegram webhook update dictionary
-            
-        Returns:
-            TruePresence-ready event or None if not relevant
         """
         try:
             # Handle different update types
             if "message" in update:
-                return self._parse_message(update["message"])
+                event_data = self._parse_message(update["message"])
             elif "edited_message" in update:
-                return self._parse_message(update["edited_message"])
+                event_data = self._parse_message(update["edited_message"])
             elif "chat_member" in update:
-                return self._parse_chat_member(update["chat_member"])
+                event_data = await self._parse_chat_member(update["chat_member"])
             elif "my_chat_member" in update:
-                return self._parse_chat_member(update["my_chat_member"])
+                event_data = await self._parse_chat_member(update["my_chat_member"])
             else:
                 return None
+            
+            return TelegramEvent(**event_data)
                 
         except Exception as e:
             logger.error(f"Failed to parse Telegram update: {e}", exc_info=True)
@@ -211,9 +208,12 @@ class TelegramAdapter:
         chat = message.get("chat", {})
         text = message.get("text", "") or ""
         user_id = str(from_user.get("id", "unknown"))
+        
+        # Standardize to Unix timestamp for internal processing
         msg_timestamp = message.get("date", time.time())
-
+        
         message_times = self._user_message_times[user_id]
+
         while message_times and msg_timestamp - message_times[0] > 60:
             message_times.popleft()
         message_times.append(msg_timestamp)
@@ -324,10 +324,8 @@ class TelegramAdapter:
         results["scores"]["mirrored_content"] = mirrored_score
         
         return results
-        
-        return results
     
-    def _parse_chat_member(self, chat_member: Dict[str, Any]) -> Dict[str, Any]:
+    async def _parse_chat_member(self, chat_member: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a chat member update (join/leave) with threat detection."""
         user = chat_member.get("user", {})
         chat = chat_member.get("chat", {})
@@ -350,7 +348,7 @@ class TelegramAdapter:
             "features": {
                 "account_age_days": self._estimate_account_age(user),
                 "username_entropy": self._calc_entropy(user.get("username", "")),
-                "previous_warnings": self._get_warning_count(user.get("id")),
+                "previous_warnings": await self._get_warning_count(user.get("id")),
                 # New member threat scores default to low
                 "torrent_indicators": 0.0,
                 "crypto_mining_indicators": 0.0,
@@ -431,28 +429,33 @@ class TelegramAdapter:
         entropy = -sum(f/len(text) * math.log2(f/len(text)) for f in freq.values() if f > 0)
         return round(entropy, 2)
     
-    def _get_warning_count(self, user_id: int) -> int:
+    async def _get_warning_count(self, user_id: int) -> int:
         """Get number of previous warnings for this user from database."""
         if not user_id:
             return 0
         try:
-            with get_db() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT COUNT(*) as warning_count FROM user_warnings WHERE user_id = %s",
-                        (user_id,)
-                    )
-                    result = cur.fetchone()
-                    return result.get("warning_count", 0) if result else 0
+            import asyncio
+            def _sync_fetch():
+                with get_db() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT COUNT(*) as warning_count FROM user_warnings WHERE user_id = %s",
+                            (user_id,)
+                        )
+                        result = cur.fetchone()
+                        return result.get("warning_count", 0) if result else 0
+            
+            return await asyncio.to_thread(_sync_fetch)
         except Exception as e:
             logger.warning(f"Failed to get warning count for user {user_id}: {e}")
             return 0
     
-    def build_response(self, evaluation_result: Dict[str, Any], tenant_id: str = None, user_id: int = None) -> Dict[str, Any]:
+    def build_response(self, evaluation_result: Dict[str, Any], tenant_id: str = None, user_id: int = None) -> TelegramAction:
         """
         Convert TruePresence result to Telegram action.
         Maps removal factors (reason_codes/threat_categories) to specific enforcement actions.
         """
+        from truepresence.adapters.telegram_models import TelegramAction
         import time as time_module
         current_time = time_module.time()
         
@@ -485,107 +488,107 @@ class TelegramAdapter:
         if any(cat in critical_factors for cat in threat_categories) or any(code in critical_factors for code in reason_codes):
             if user_id is not None:
                 _ban_actions[user_id] = current_time
-            return {
-                "action": "ban",
-                "reason": f"CRITICAL SECURITY VIOLATION: {block_reason or 'Illegal content detected'}",
-                "confidence": confidence,
-                "threat_categories": threat_categories,
-                "tenant_id": tenant_id,
-            }
+            return TelegramAction(
+                action="ban",
+                reason=f"CRITICAL SECURITY VIOLATION: {block_reason or 'Illegal content detected'}",
+                confidence=confidence,
+                threat_categories=threat_categories,
+                tenant_id=tenant_id,
+            )
 
         # 2. Policy Violations -> Ban if high confidence, else Kick/Warn
         if any(cat in policy_factors for cat in threat_categories) or any(code in policy_factors for code in reason_codes):
             if confidence > 0.8:
                 if user_id is not None:
                     _ban_actions[user_id] = current_time
-                return {
-                    "action": "ban",
-                    "reason": f"Policy Violation: {block_reason or 'Repeated policy breach'}",
-                    "confidence": confidence,
-                    "threat_categories": threat_categories,
-                    "tenant_id": tenant_id,
-                }
+                return TelegramAction(
+                    action="ban",
+                    reason=f"Policy Violation: {block_reason or 'Repeated policy breach'}",
+                    confidence=confidence,
+                    threat_categories=threat_categories,
+                    tenant_id=tenant_id,
+                )
             elif confidence > 0.5:
-                return {
-                    "action": "kick",
-                    "reason": f"Policy Warning: {block_reason or 'Suspicious activity'}",
-                    "confidence": confidence,
-                    "threat_categories": threat_categories,
-                    "tenant_id": tenant_id,
-                }
+                return TelegramAction(
+                    action="kick",
+                    reason=f"Policy Warning: {block_reason or 'Suspicious activity'}",
+                    confidence=confidence,
+                    threat_categories=threat_categories,
+                    tenant_id=tenant_id,
+                )
 
         # 3. Engine State-based Enforcement
         if state == "EJECT":
             if user_id is not None:
                 _ban_actions[user_id] = current_time
-            return {
-                "action": "ban",
-                "reason": block_reason or "Deterministic policy violation",
-                "confidence": confidence,
-                "threat_categories": threat_categories,
-                "tenant_id": tenant_id,
-            }
+            return TelegramAction(
+                action="ban",
+                reason=block_reason or "Deterministic policy violation",
+                confidence=confidence,
+                threat_categories=threat_categories,
+                tenant_id=tenant_id,
+            )
         if state == "RESTRICT":
-            return {
-                "action": "kick",
-                "reason": block_reason or "Restricted pending further review",
-                "confidence": confidence,
-                "threat_categories": threat_categories,
-                "tenant_id": tenant_id,
-            }
+            return TelegramAction(
+                action="kick",
+                reason=block_reason or "Restricted pending further review",
+                confidence=confidence,
+                threat_categories=threat_categories,
+                tenant_id=tenant_id,
+            )
         if state == "STEP_UP_AUTH":
-            return {
-                "action": "challenge",
-                "reason": "Additional verification required",
-                "confidence": confidence,
-                "tenant_id": tenant_id,
-            }
+            return TelegramAction(
+                action="challenge",
+                reason="Additional verification required",
+                confidence=confidence,
+                tenant_id=tenant_id,
+            )
         if state == "OBSERVE":
-            return {
-                "action": "allow",
-                "reason": "Allowed with monitoring",
-                "confidence": confidence,
-                "tenant_id": tenant_id,
-                "monitor": True,
-            }
+            return TelegramAction(
+                action="allow",
+                reason="Allowed with monitoring",
+                confidence=confidence,
+                tenant_id=tenant_id,
+                # monitor = True is handled in metadata or a custom field if needed
+            )
         
         # 4. General Bot Detection
         if decision == "block" and confidence > 0.8:
             if user_id is not None:
                 _ban_actions[user_id] = current_time
-            return {
-                "action": "ban",
-                "reason": block_reason or f"Bot detected ({human_prob:.0%} human probability)",
-                "confidence": confidence,
-                "tenant_id": tenant_id
-            }
+            return TelegramAction(
+                action="ban",
+                reason=block_reason or f"Bot detected ({human_prob:.0%} human probability)",
+                confidence=confidence,
+                tenant_id=tenant_id
+            )
         elif decision == "block" and confidence > 0.6:
-            return {
-                "action": "kick",
-                "reason": block_reason or f"Suspicious ({human_prob:.0%} human probability)",
-                "confidence": confidence,
-                "tenant_id": tenant_id
-            }
+            return TelegramAction(
+                action="kick",
+                reason=block_reason or f"Suspicious ({human_prob:.0%} human probability)",
+                confidence=confidence,
+                tenant_id=tenant_id
+            )
         elif decision == "challenge":
-            return {
-                "action": "challenge",
+            return TelegramAction(
+                action="challenge",
                 "reason": "Verification required",
                 "confidence": confidence,
                 "tenant_id": tenant_id
-            }
+            )
         elif decision == "review":
-            return {
-                "action": "alert_admin",
-                "reason": f"Review needed - {evaluation_result.get('risk_factors', [])}",
-                "confidence": confidence,
-                "tenant_id": tenant_id
-            }
+            return TelegramAction(
+                action="alert_admin",
+                reason=f"Review needed - {evaluation_result.get('risk_factors', [])}",
+                confidence=confidence,
+                tenant_id=tenant_id
+            )
         
-        return {
-            "action": "allow",
-            "confidence": confidence,
-            "tenant_id": tenant_id
-        }
+        return TelegramAction(
+            action="allow",
+            confidence=confidence,
+            tenant_id=tenant_id
+        )
 
         
         state = evaluation_result.get("state")
