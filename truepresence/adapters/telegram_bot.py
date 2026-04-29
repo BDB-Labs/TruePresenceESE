@@ -20,7 +20,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from truepresence.adapters.telegram import TelegramAdapter
-from truepresence.adapters.telegram_models import TelegramAction, TelegramEvent
 from truepresence.core.runtime import (
     decision_engine as shared_decision_engine,
 )
@@ -28,7 +27,7 @@ from truepresence.core.runtime import (
     orchestrator as shared_orchestrator,
 )
 from truepresence.db import get_db
-
+from truepresence.exceptions import TruePresenceError
 from truepresence.surfaces.telegram.adapter import TelegramGuardAdapter
 
 # Configure logging - CRITICAL systems must log
@@ -113,6 +112,9 @@ class TelegramProtectionService:
         
         # Multi-tenant data is now handled via Database (TruePresence DB)
         self.user_sessions: Dict[str, Dict[str, Any]] = {} # Transient cache for active requests
+        self.pending_reviews: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self.admin_chats: Dict[str, set[int]] = {}
+        self.protected_groups: Dict[str, set[int]] = {}
         
         self.http_client = httpx.AsyncClient()
         
@@ -126,15 +128,18 @@ class TelegramProtectionService:
         return self._resolve_token_sync(tenant_id)
 
     def _resolve_token_sync(self, tenant_id: str) -> str | None:
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT bot_token FROM telegram_bot_tokens WHERE tenant_id = %s", 
-                    (tenant_id,)
-                )
-                row = cur.fetchone()
-                if row:
-                    return row["bot_token"]
+        try:
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT bot_token FROM telegram_bot_tokens WHERE tenant_id = %s",
+                        (tenant_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return row["bot_token"]
+        except Exception as exc:
+            logger.warning("[%s] Token DB lookup unavailable; falling back to environment: %s", tenant_id, exc)
         return os.environ.get(f"TELEGRAM_BOT_TOKEN_{tenant_id.upper()}") or os.environ.get("TELEGRAM_BOT_TOKEN")
 
     async def _resolve_tenant_from_token(self, bot_token: str) -> str | None:
@@ -149,7 +154,11 @@ class TelegramProtectionService:
                     row = cur.fetchone()
                     return row["tenant_id"] if row else None
         
-        tenant_id = await asyncio.to_thread(_sync_fetch)
+        try:
+            tenant_id = await asyncio.to_thread(_sync_fetch)
+        except Exception as exc:
+            logger.warning("Tenant DB lookup unavailable; falling back to environment token match: %s", exc)
+            tenant_id = None
         if tenant_id:
             return tenant_id
         
@@ -323,7 +332,7 @@ class TelegramProtectionService:
         
         try:
             # Parse into TruePresence event
-            event = await adapter.parse_update(update)
+            event = adapter.parse_update(update)
             
             if not event:
                 logger.debug(f"[{tenant_id}] No relevant event to process")
@@ -336,21 +345,25 @@ class TelegramProtectionService:
             session_id = f"tg_{tenant_id}_{user_id}"
             
             # Load session from DB
-            with get_db() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT data FROM telegram_user_sessions WHERE session_id = %s", 
-                        (session_id,)
-                    )
-                    row = cur.fetchone()
-                    if row:
-                        session = json.loads(row["data"])
-                    else:
-                        session = {"session_id": session_id, "tenant_id": tenant_id}
+            try:
+                with get_db() as conn:
+                    with conn.cursor() as cur:
                         cur.execute(
-                            "INSERT INTO telegram_user_sessions (session_id, tenant_id, data) VALUES (%s, %s, %s)",
-                            (session_id, tenant_id, json.dumps(session))
+                            "SELECT data FROM telegram_user_sessions WHERE session_id = %s",
+                            (session_id,)
                         )
+                        row = cur.fetchone()
+                        if row:
+                            session = json.loads(row["data"])
+                        else:
+                            session = {"session_id": session_id, "tenant_id": tenant_id}
+                            cur.execute(
+                                "INSERT INTO telegram_user_sessions (session_id, tenant_id, data) VALUES (%s, %s, %s)",
+                                (session_id, tenant_id, json.dumps(session))
+                            )
+            except Exception as exc:
+                logger.warning("[%s] Session DB unavailable; using in-memory session state: %s", tenant_id, exc)
+                session = self.user_sessions.get(session_id, {"session_id": session_id, "tenant_id": tenant_id})
             
             # Evaluate with TruePresence
             decision_result = guard_adapter.evaluate_event(
@@ -382,12 +395,16 @@ class TelegramProtectionService:
             # Update session data in DB
             session["last_event_type"] = event["event_type"]
             session["last_event_timestamp"] = event["timestamp"]
-            with get_db() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE telegram_user_sessions SET data = %s, updated_at = NOW() WHERE session_id = %s",
-                        (json.dumps(session), session_id)
-                    )
+            try:
+                with get_db() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE telegram_user_sessions SET data = %s, updated_at = NOW() WHERE session_id = %s",
+                            (json.dumps(session), session_id)
+                        )
+            except Exception as exc:
+                logger.warning("[%s] Session DB update unavailable; retaining in-memory session state: %s", tenant_id, exc)
+                self.user_sessions[session_id] = session
 
             # Handle manual review cases
             if action.get("action") == "alert_admin":
@@ -401,15 +418,14 @@ class TelegramProtectionService:
         except Exception as e:
             logger.critical(f"[{tenant_id}] UNHANDLED ERROR: {e}", exc_info=True)
             raise
-
-        except Exception as e:
-            logger.critical(f"[{tenant_id}] UNHANDLED ERROR: {e}", exc_info=True)
-            raise
     
     async def register_group(self, group_id: int, admin_chat_id: int = None, tenant_id: str = None):
         """Register a group for protection."""
         tenant_id = tenant_id or self.tenant_id
         self._ensure_tenant(tenant_id)
+        self.protected_groups.setdefault(tenant_id, set()).add(group_id)
+        if admin_chat_id:
+            self.admin_chats.setdefault(tenant_id, set()).add(admin_chat_id)
         
         def _sync_reg():
             with get_db() as conn:
@@ -423,8 +439,11 @@ class TelegramProtectionService:
                             "INSERT INTO telegram_admin_chats (chat_id, tenant_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                             (admin_chat_id, tenant_id)
                         )
-        await asyncio.to_thread(_sync_reg)
-        logger.info(f"[{tenant_id}] Registered group {group_id} for protection in DB")
+        try:
+            await asyncio.to_thread(_sync_reg)
+            logger.info(f"[{tenant_id}] Registered group {group_id} for protection in DB")
+        except Exception as exc:
+            logger.warning("[%s] Group DB registration unavailable; using in-memory registration: %s", tenant_id, exc)
 
     async def get_status(self, tenant_id: str = None) -> Dict[str, Any]:
         """Get service status for a tenant or all tenants."""
@@ -488,10 +507,37 @@ class TelegramProtectionService:
                     "orchestrator_type": orch_type
                 }
 
-        return await asyncio.to_thread(_sync_status)
+        try:
+            return await asyncio.to_thread(_sync_status)
+        except Exception as exc:
+            logger.warning("[%s] Status DB lookup unavailable; using in-memory status: %s", tenant_id, exc)
+            if tenant_id == "all":
+                tenants = sorted(set(self.protected_groups) | set(self.pending_reviews) | set(self.user_sessions))
+                return {
+                    "status": "healthy",
+                    "multi_tenant": True,
+                    "tenants": {
+                        tid: {
+                            "protected_groups": len(self.protected_groups.get(tid, set())),
+                            "active_sessions": len([sid for sid in self.user_sessions if sid.startswith(f"tg_{tid}_")]),
+                            "pending_reviews": len(self.pending_reviews.get(tid, {})),
+                            "orchestrator_type": orch_type,
+                        }
+                        for tid in tenants
+                    },
+                    "total_tenants": len(tenants),
+                }
+            return {
+                "status": "healthy",
+                "tenant_id": tenant_id,
+                "protected_groups": len(self.protected_groups.get(tenant_id, set())),
+                "active_sessions": len([sid for sid in self.user_sessions if sid.startswith(f"tg_{tenant_id}_")]),
+                "pending_reviews": len(self.pending_reviews.get(tenant_id, {})),
+                "orchestrator_type": orch_type,
+            }
 
 
-    async def add_pending_review(self, review_data: Dict[str, Any], tenant_id: str = None):
+    def add_pending_review(self, review_data: Dict[str, Any], tenant_id: str = None):
         """Add a case that requires manual review."""
         tenant_id = tenant_id or self.tenant_id
         self._ensure_tenant(tenant_id)
@@ -501,15 +547,17 @@ class TelegramProtectionService:
         review_data["status"] = "pending"
         review_data["created_at"] = datetime.now(timezone.utc).isoformat()
         review_data["tenant_id"] = tenant_id
+        self.pending_reviews.setdefault(tenant_id, {})[review_id] = dict(review_data)
         
-        def _sync_add():
+        try:
             with get_db() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "INSERT INTO telegram_pending_reviews (review_id, tenant_id, data, status, created_at) VALUES (%s, %s, %s, %s, %s)",
                         (review_id, tenant_id, json.dumps(review_data), "pending", review_data["created_at"])
                     )
-        await asyncio.to_thread(_sync_add)
+        except Exception as exc:
+            logger.warning("[%s] Pending review DB insert unavailable; using in-memory review store: %s", tenant_id, exc)
         return review_id
 
     async def get_pending_reviews(self, tenant_id: str = None) -> List[Dict[str, Any]]:
@@ -524,7 +572,15 @@ class TelegramProtectionService:
                     )
                     rows = cur.fetchall()
                     return [json.loads(r["data"]) for r in rows]
-        return await asyncio.to_thread(_sync_get)
+        try:
+            return await asyncio.to_thread(_sync_get)
+        except Exception as exc:
+            logger.warning("[%s] Pending review DB lookup unavailable; using in-memory review store: %s", tenant_id, exc)
+            return [
+                dict(review)
+                for review in self.pending_reviews.get(tenant_id, {}).values()
+                if review.get("status") == "pending"
+            ]
 
     async def resolve_review(self, review_id: str, admin_decision: str, admin_notes: str = "", tenant_id: str = None) -> bool:
         """Resolve a pending review with admin decision."""
@@ -553,7 +609,18 @@ class TelegramProtectionService:
                         (json.dumps(review), review_id)
                     )
                     return True
-        return await asyncio.to_thread(_sync_resolve)
+        try:
+            return await asyncio.to_thread(_sync_resolve)
+        except Exception as exc:
+            logger.warning("[%s] Review DB update unavailable; using in-memory review store: %s", tenant_id, exc)
+            review = self.pending_reviews.get(tenant_id, {}).get(review_id)
+            if not review:
+                return False
+            review["status"] = "resolved"
+            review["admin_decision"] = admin_decision
+            review["admin_notes"] = admin_notes
+            review["resolved_at"] = datetime.now(timezone.utc).isoformat()
+            return True
 
     async def execute_review_decision(self, review_id: str, tenant_id: str = None):
         """Execute the admin decision for a review."""
@@ -569,12 +636,18 @@ class TelegramProtectionService:
                     row = cur.fetchone()
                     return row
         
-        row = await asyncio.to_thread(_sync_get_review)
+        try:
+            row = await asyncio.to_thread(_sync_get_review)
+        except Exception as exc:
+            logger.warning("[%s] Review DB lookup unavailable; using in-memory review store: %s", tenant_id, exc)
+            row = None
         
-        if not row:
-            return {"status": "failed", "error": "Review not found"}
-            
-        review = json.loads(row["data"])
+        if row:
+            review = json.loads(row["data"])
+        else:
+            review = self.pending_reviews.get(tenant_id, {}).get(review_id)
+            if not review:
+                return {"status": "failed", "error": "Review not found"}
         
         if review.get("status") != "resolved":
             return {"status": "failed", "error": "Review not yet resolved by admin"}
@@ -585,7 +658,7 @@ class TelegramProtectionService:
         chat_id = original_message.get("chat", {}).get("id")
         message_id = original_message.get("message_id")
         
-        bot_token = self._bot_token_for_tenant(tenant_id)
+        bot_token = await asyncio.to_thread(self._resolve_token_sync, tenant_id)
         if not bot_token:
             logger.warning("TELEGRAM_BOT_TOKEN not set, cannot execute admin decision")
             return {
@@ -761,6 +834,29 @@ service = TelegramProtectionService(
 # Note: Exception handlers must be added to main app, not router
 
 # Telegram Webhook Endpoint
+@router.post("/webhook")
+async def telegram_webhook_for_tenant(request: Request):
+    """Receive Telegram webhook updates for an explicitly selected tenant."""
+    tenant_id = _tenant_id_from_request(request)
+    _verify_webhook_secret(request, tenant_id)
+    update = await request.json()
+
+    logger.info(f"[{tenant_id}] Received Telegram update: {update.get('update_id')}")
+    action = await service.process_update(update, tenant_id=tenant_id)
+
+    if not action:
+        return {"ok": True, "action": "ignored", "tenant_id": tenant_id}
+
+    return {
+        "ok": True,
+        "action": action.get("action"),
+        "reason": action.get("reason", ""),
+        "confidence": action.get("confidence", 0),
+        "details": action.get("evaluation", {}),
+        "tenant_id": tenant_id,
+    }
+
+
 @router.post("/webhook/{bot_token}")
 async def telegram_webhook(bot_token: str, request: Request):
     """

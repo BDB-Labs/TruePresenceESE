@@ -12,9 +12,9 @@ import time
 from collections import defaultdict, deque
 from typing import Any, Dict, Optional
 
+from truepresence.adapters.telegram_models import TelegramAction, TelegramEvent
 from truepresence.db import get_db
 from truepresence.exceptions import EvidenceError
-from truepresence.adapters.telegram_models import TelegramEvent
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ class TelegramAdapter:
                     re.I
                 )
         
-    async def parse_update(self, update: Dict[str, Any]) -> Optional[TelegramEvent]:
+    def parse_update(self, update: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Parse Telegram update into TruePresence event.
         """
@@ -184,13 +184,13 @@ class TelegramAdapter:
             elif "edited_message" in update:
                 event_data = self._parse_message(update["edited_message"])
             elif "chat_member" in update:
-                event_data = await self._parse_chat_member(update["chat_member"])
+                event_data = self._parse_chat_member(update["chat_member"])
             elif "my_chat_member" in update:
-                event_data = await self._parse_chat_member(update["my_chat_member"])
+                event_data = self._parse_chat_member(update["my_chat_member"])
             else:
                 return None
             
-            return TelegramEvent(**event_data)
+            return TelegramEvent(**event_data).model_dump()
                 
         except Exception as e:
             logger.error(f"Failed to parse Telegram update: {e}", exc_info=True)
@@ -325,7 +325,7 @@ class TelegramAdapter:
         
         return results
     
-    async def _parse_chat_member(self, chat_member: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_chat_member(self, chat_member: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a chat member update (join/leave) with threat detection."""
         user = chat_member.get("user", {})
         chat = chat_member.get("chat", {})
@@ -348,7 +348,7 @@ class TelegramAdapter:
             "features": {
                 "account_age_days": self._estimate_account_age(user),
                 "username_entropy": self._calc_entropy(user.get("username", "")),
-                "previous_warnings": await self._get_warning_count(user.get("id")),
+                "previous_warnings": self._get_warning_count(user.get("id")),
                 # New member threat scores default to low
                 "torrent_indicators": 0.0,
                 "crypto_mining_indicators": 0.0,
@@ -429,23 +429,19 @@ class TelegramAdapter:
         entropy = -sum(f/len(text) * math.log2(f/len(text)) for f in freq.values() if f > 0)
         return round(entropy, 2)
     
-    async def _get_warning_count(self, user_id: int) -> int:
+    def _get_warning_count(self, user_id: int) -> int:
         """Get number of previous warnings for this user from database."""
         if not user_id:
             return 0
         try:
-            import asyncio
-            def _sync_fetch():
-                with get_db() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "SELECT COUNT(*) as warning_count FROM user_warnings WHERE user_id = %s",
-                            (user_id,)
-                        )
-                        result = cur.fetchone()
-                        return result.get("warning_count", 0) if result else 0
-            
-            return await asyncio.to_thread(_sync_fetch)
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*) as warning_count FROM user_warnings WHERE user_id = %s",
+                        (user_id,)
+                    )
+                    result = cur.fetchone()
+                    return result.get("warning_count", 0) if result else 0
         except Exception as e:
             logger.warning(f"Failed to get warning count for user {user_id}: {e}")
             return 0
@@ -455,22 +451,20 @@ class TelegramAdapter:
         Convert TruePresence result to Telegram action.
         Maps removal factors (reason_codes/threat_categories) to specific enforcement actions.
         """
-        from truepresence.adapters.telegram_models import TelegramAction
-        import time as time_module
-        current_time = time_module.time()
+        current_time = time.time()
         
         # Check rate limit for ban actions
         if user_id is not None:
             last_ban_time = _ban_actions.get(user_id, 0)
             if current_time - last_ban_time < BAN_COOLDOWN_SECONDS:
                 logger.info(f"Rate-limited ban for user {user_id}, downgrading to alert")
-                return {
-                    "action": "alert_admin",
-                    "reason": f"Rate-limited: {evaluation_result.get('risk_factors', [])}",
-                    "confidence": evaluation_result.get("confidence", 0.0),
-                    "tenant_id": tenant_id,
-                    "rate_limited": True
-                }
+                return TelegramAction(
+                    action="alert_admin",
+                    reason=f"Rate-limited: {evaluation_result.get('risk_factors', [])}",
+                    confidence=evaluation_result.get("confidence", 0.0),
+                    tenant_id=tenant_id,
+                    rate_limited=True,
+                )
         
         state = evaluation_result.get("state")
         decision = evaluation_result.get("decision", "allow")
@@ -572,9 +566,9 @@ class TelegramAdapter:
         elif decision == "challenge":
             return TelegramAction(
                 action="challenge",
-                "reason": "Verification required",
-                "confidence": confidence,
-                "tenant_id": tenant_id
+                reason="Verification required",
+                confidence=confidence,
+                tenant_id=tenant_id,
             )
         elif decision == "review":
             return TelegramAction(

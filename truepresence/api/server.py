@@ -16,9 +16,6 @@ from truepresence.core.runtime import (
 from truepresence.core.session import Session
 from truepresence.exceptions import TruePresenceError
 
-from truepresence.core.runtime import orchestrator
-from truepresence.core.session import Session
-
 # Configure logging - CRITICAL systems must log
 logging.basicConfig(
     level=logging.INFO,
@@ -30,6 +27,27 @@ app = FastAPI(title="TruePresence ESE API", version="1.0.0")
 
 # Sessions are now managed by the distributed runtime (Redis)
 # removed: SESSIONS = {}
+
+
+def _distributed_runtime():
+    candidates = [
+        shared_orchestrator,
+        getattr(shared_orchestrator, "legacy_orchestrator", None),
+    ]
+    for candidate in candidates:
+        distributed = getattr(candidate, "distributed", None)
+        if distributed is not None and getattr(distributed, "available", False):
+            return distributed
+    return None
+
+
+def _get_session_field(distributed, session_id: str, field: str):
+    if hasattr(distributed, "get_session_field"):
+        return distributed.get_session_field(session_id, field)
+    if hasattr(distributed, "load_session"):
+        session = distributed.load_session(session_id) or {}
+        return session.get(field)
+    return None
 
 
 
@@ -130,8 +148,9 @@ def create_session(request: Optional[CreateSessionRequest] = None, assurance_lev
     )
     
     # Store session in distributed runtime (Redis)
-    if orchestrator.distributed and orchestrator.distributed.available:
-        orchestrator.distributed.update_session_field(
+    distributed = _distributed_runtime()
+    if distributed is not None:
+        distributed.update_session_field(
             session_id, "session_meta", session.model_dump()
         )
     
@@ -161,8 +180,9 @@ def evaluate(request: EvaluateRequest):
     """
     # Get or create session
     session_data = None
-    if orchestrator.distributed and orchestrator.distributed.available:
-        session_data = orchestrator.distributed.get_session_field(request.session_id, "session_meta")
+    distributed = _distributed_runtime()
+    if distributed is not None:
+        session_data = _get_session_field(distributed, request.session_id, "session_meta")
 
     if not session_data:
         # Create new session if doesn't exist
@@ -171,8 +191,8 @@ def evaluate(request: EvaluateRequest):
             created_at=datetime.now(timezone.utc),
             assurance_level="A1"
         )
-        if orchestrator.distributed and orchestrator.distributed.available:
-            orchestrator.distributed.update_session_field(
+        if distributed is not None:
+            distributed.update_session_field(
                 request.session_id, "session_meta", session.model_dump()
             )
         session_data = session.model_dump()

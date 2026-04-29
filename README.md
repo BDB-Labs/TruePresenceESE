@@ -13,6 +13,8 @@ Generic orchestration, role execution infrastructure, model routing, and extensi
 
 Production auth requires `JWT_SECRET` to be set. A development fallback is only allowed when explicit development mode is enabled together with `TRUEPRESENCE_ALLOW_DEV_AUTH`.
 
+For product startup, backend, dashboard, Telegram webhook, and production environment setup, see [docs/TRUEPRESENCE_STARTUP.md](docs/TRUEPRESENCE_STARTUP.md).
+
 ## Core pipeline
 
 ```mermaid

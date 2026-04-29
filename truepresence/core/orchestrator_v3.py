@@ -8,7 +8,6 @@ distributed deployment support.
 
 import logging
 import os
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 

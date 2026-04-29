@@ -1,7 +1,9 @@
 from __future__ import annotations
-from pydantic import BaseModel, Field
+
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+
+from pydantic import BaseModel, Field
+
 
 class TelegramUser(BaseModel):
     id: int
@@ -41,3 +43,9 @@ class TelegramAction(BaseModel):
     rate_limited: bool = False
     evaluation: Optional[Dict[str, Any]] = None
     execution: Optional[Dict[str, Any]] = None
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)

@@ -10,6 +10,9 @@ import os
 from contextlib import contextmanager
 from urllib.parse import quote
 
+from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,9 +48,6 @@ DATABASE_URL = _build_database_url() if any(
     k in os.environ for k in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
 ) else None
 
-
-from psycopg2.pool import ThreadedConnectionPool
-from psycopg2.extras import RealDictCursor
 
 # Global pool instance
 _pool = None
@@ -88,7 +88,7 @@ def init_db():
     Initialize database schema.
     Creates tables if they don't exist — safe to run on every startup.
     """
-    schema = \"\"\"
+    schema = """
     CREATE TABLE IF NOT EXISTS users (
         id          SERIAL PRIMARY KEY,
         email       VARCHAR(255) UNIQUE NOT NULL,
@@ -145,7 +145,7 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_users_role      ON users(role);
     CREATE INDEX IF NOT EXISTS idx_warns_user_tenant ON user_warnings(user_id, tenant_id);
-    \"\"\"
+    """
 
 
     with get_db() as conn:
