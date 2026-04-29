@@ -73,3 +73,8 @@ def test_telegram_review_resolve_uses_router_singleton() -> None:
     assert response.status_code == 200
     assert response.json()["review_id"] == review_id
     assert telegram_bot.service.pending_reviews[tenant_id][review_id]["status"] == "resolved"
+
+    details = client.get(f"/telegram/reviews/{review_id}?tenant={tenant_id}")
+
+    assert details.status_code == 200
+    assert details.json()["status"] == "resolved"

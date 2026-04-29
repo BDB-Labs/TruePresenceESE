@@ -122,7 +122,7 @@ class TelegramProtectionService:
         self.tenant_name = os.environ.get(f"TENANT_NAME_{tenant_id.upper()}", tenant_id)
         self.tenant_created = datetime.now(timezone.utc).isoformat()
 
-    async     def _bot_token_for_tenant(self, tenant_id: str) -> str | None:
+    async def _bot_token_for_tenant(self, tenant_id: str) -> str | None:
         # This remains for internal use (e.g. sending messages)
         # Now delegated to _resolve_token_sync for internal callers
         return self._resolve_token_sync(tenant_id)
@@ -582,6 +582,27 @@ class TelegramProtectionService:
                 if review.get("status") == "pending"
             ]
 
+    async def get_review(self, review_id: str, tenant_id: str = None) -> Optional[Dict[str, Any]]:
+        """Get one manual review, regardless of status."""
+        tenant_id = tenant_id or self.tenant_id
+
+        def _sync_get():
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT data FROM telegram_pending_reviews WHERE review_id = %s AND tenant_id = %s",
+                        (review_id, tenant_id),
+                    )
+                    row = cur.fetchone()
+                    return json.loads(row["data"]) if row else None
+
+        try:
+            return await asyncio.to_thread(_sync_get)
+        except Exception as exc:
+            logger.warning("[%s] Review DB lookup unavailable; using in-memory review store: %s", tenant_id, exc)
+            review = self.pending_reviews.get(tenant_id, {}).get(review_id)
+            return dict(review) if review else None
+
     async def resolve_review(self, review_id: str, admin_decision: str, admin_notes: str = "", tenant_id: str = None) -> bool:
         """Resolve a pending review with admin decision."""
         tenant_id = tenant_id or self.tenant_id
@@ -941,8 +962,7 @@ async def get_all_reviews(request: Request):
 async def get_review_details(review_id: str, request: Request):
     """Get details of a specific manual review."""
     tenant_id = _tenant_id_from_request(request)
-    reviews = await service.get_pending_reviews(tenant_id)
-    review = next((r for r in reviews if r["review_id"] == review_id), None)
+    review = await service.get_review(review_id, tenant_id)
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
     return review
@@ -978,8 +998,7 @@ async def execute_review_decision(review_id: str, request: Request):
     """Execute the admin decision for a review."""
     tenant_id = _tenant_id_from_request(request)
     
-    reviews = await service.get_pending_reviews(tenant_id)
-    review = next((r for r in reviews if r["review_id"] == review_id), None)
+    review = await service.get_review(review_id, tenant_id)
     
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
