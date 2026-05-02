@@ -209,7 +209,7 @@ class DistributedRuntime:
             logger.error(f"Error deleting session: {e}")
             return False
     
-    def update_session_field(self, session_id: str, field: str, value: Any) -> bool:
+    def update_session_field(self, session_id: str, field: str, value: Any, ttl: Optional[int] = None) -> bool:
         """
         Update a specific field in the session.
         
@@ -217,6 +217,7 @@ class DistributedRuntime:
             session_id: Session identifier
             field: Field name to update
             value: New value for the field
+            ttl: Optional custom TTL in seconds
             
         Returns:
             True if successful, False otherwise
@@ -226,6 +227,28 @@ class DistributedRuntime:
             session = {}
             
         session[field] = value
+        
+        # If custom TTL is provided, use it instead of default
+        if ttl is not None:
+            try:
+                # We can't easily use store_session because it uses self.ttl_seconds
+                # So we implement custom store for this case
+                if self.available and self.redis_client:
+                    key = self._get_session_key(session_id)
+                    session["updated_at"] = time.time()
+                    self.redis_client.setex(
+                        key,
+                        ttl,
+                        json.dumps(session)
+                    )
+                    return True
+                else:
+                    self._memory_store[f"truepresence:session:{session_id}"] = session
+                    return True
+            except Exception as e:
+                logger.error(f"Error updating session field with TTL: {e}")
+                return False
+                
         return self.store_session(session_id, session)
     
     def get_session_count(self) -> int:
