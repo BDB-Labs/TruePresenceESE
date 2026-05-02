@@ -11,7 +11,7 @@ from truepresence.challenges.deterministic import stable_index
 from truepresence.challenges.validator import ChallengeValidator
 from truepresence.core.runtime import decision_engine as shared_decision_engine
 from truepresence.redteam.evaluate import RedTeamEvaluator
-from truepresence.api.auth import SECRET_KEY, ALGORITHM
+from truepresence.api.auth import get_secret_key, ALGORITHM
 
 router = APIRouter()
 
@@ -43,7 +43,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         return
     
     try:
-        jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        jwt.decode(token, get_secret_key(), algorithms=[ALGORITHM])
     except JoseJWTError:
         await websocket.close(code=4001, reason="Invalid or expired token")
         return

@@ -41,9 +41,46 @@ def _build_database_url() -> str:
     )
 
 
-DATABASE_URL = _build_database_url() if any(
-    k in os.environ for k in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
-) else None
+DATABASE_URL: str | None = None
+
+
+def get_database_url() -> str:
+    """Lazily build and return the database URL."""
+    global DATABASE_URL
+    if DATABASE_URL is not None:
+        return DATABASE_URL
+        
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        DATABASE_URL = url
+        return url
+
+    # Railway injects these individually when DATABASE_URL isn't linked
+    host = os.environ.get("PGHOST") or os.environ.get("POSTGRES_HOST")
+    port = os.environ.get("PGPORT") or os.environ.get("POSTGRES_PORT", "5432")
+    user = os.environ.get("PGUSER") or os.environ.get("POSTGRES_USER")
+    password = os.environ.get("PGPASSWORD") or os.environ.get("POSTGRES_PASSWORD")
+    database = os.environ.get("PGDATABASE") or os.environ.get("POSTGRES_DB")
+
+    if all([host, user, password, database]):
+        safe_user = quote(user, safe="")
+        safe_password = quote(password, safe="")
+        safe_database = quote(database, safe="")
+        DATABASE_URL = f"postgresql://{safe_user}:{safe_password}@{host}:{port}/{safe_database}"
+        return DATABASE_URL
+
+    raise RuntimeError(
+        "No database connection info found. Set DATABASE_URL or "
+        "PGHOST/PGUSER/PGPASSWORD/PGDATABASE in environment variables."
+    )
+
+
+def _database_configured() -> bool:
+    """Check if database is configured without raising."""
+    return any(
+        key in os.environ
+        for key in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
+    )
 
 
 from psycopg2.pool import ThreadedConnectionPool

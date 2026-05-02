@@ -42,7 +42,16 @@ def resolve_jwt_secret() -> str:
     return secret
 
 
-SECRET_KEY = resolve_jwt_secret()
+# Lazy-load the secret when first needed
+_SECRET_KEY: str | None = None
+
+
+def get_secret_key() -> str:
+    """Lazily load and cache the JWT secret."""
+    global _SECRET_KEY
+    if _SECRET_KEY is None:
+        _SECRET_KEY = resolve_jwt_secret()
+    return _SECRET_KEY
 bearer_scheme = HTTPBearer()
 
 
@@ -118,7 +127,7 @@ def create_token(user_id: int, email: str, role: str, tenant_id: str) -> str:
         "tenant_id": tenant_id,
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
     }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, get_secret_key(), algorithm=ALGORITHM)
 
 
 def get_limiter():
@@ -133,7 +142,7 @@ def get_limiter():
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(token, get_secret_key(), algorithms=[ALGORITHM])
     except JoseJWTError as exc:
         logger.warning("Token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
