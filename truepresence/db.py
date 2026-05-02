@@ -123,10 +123,12 @@ def get_db():
 def init_db():
     """
     Initialize database schema.
-    Creates tables if they don't exist — safe to run on every startup.
+    DEPRECATED: Use 'alembic upgrade head' instead.
     """
+    logger.warning("init_db() is deprecated. Please use alembic upgrade head.")
     schema = \"\"\"
     CREATE TABLE IF NOT EXISTS users (
+
         id          SERIAL PRIMARY KEY,
         email       VARCHAR(255) UNIQUE NOT NULL,
         name        VARCHAR(255) NOT NULL,
