@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import asdict, is_dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from truepresence.runtime.distributed import DistributedRuntime
+
+logger = logging.getLogger(__name__)
 
 class ArtifactStore:
-    def __init__(self):
-        self.evidence_packets: List[Dict[str, Any]] = []
-        self.argument_graphs: List[Dict[str, Any]] = []
-        self.role_reports: List[Dict[str, Any]] = []
-        self.decision_artifacts: List[Dict[str, Any]] = []
+    def __init__(self, distributed_runtime: Optional[DistributedRuntime] = None):
+        self.dist = distributed_runtime or DistributedRuntime()
 
     def _to_dict(self, value: Any) -> Dict[str, Any]:
         if is_dataclass(value):
@@ -21,14 +23,26 @@ class ArtifactStore:
         return {"value": value}
 
     def store_evidence_packet(self, packet: Any) -> None:
-        self.evidence_packets.append(self._to_dict(packet))
+        packet_id = getattr(packet, "packet_id", "unknown")
+        self.dist.update_session_field(
+            f"artifact:packet:{packet_id}", "data", self._to_dict(packet)
+        )
 
     def store_argument_graph(self, graph: Any) -> None:
-        self.argument_graphs.append(self._to_dict(graph))
+        graph_id = getattr(graph, "graph_id", "unknown")
+        self.dist.update_session_field(
+            f"artifact:graph:{graph_id}", "data", self._to_dict(graph)
+        )
 
     def store_role_reports(self, reports: List[Any]) -> None:
         for report in reports or []:
-            self.role_reports.append(self._to_dict(report))
+            report_id = report.get("report_id", "unknown")
+            self.dist.update_session_field(
+                f"artifact:report:{report_id}", "data", self._to_dict(report)
+            )
 
     def store_decision_artifact(self, artifact: Dict[str, Any]) -> None:
-        self.decision_artifacts.append(dict(artifact))
+        decision_id = artifact.get("decision_id", "unknown")
+        self.dist.update_session_field(
+            f"artifact:decision:{decision_id}", "data", dict(artifact)
+        )
