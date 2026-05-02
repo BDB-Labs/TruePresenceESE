@@ -37,6 +37,11 @@ flowchart TD
 pip install ese-cli
 ```
 
+> **Note (Production):** `psycopg2-binary` is included for development convenience. For production deployments, use the system-installed `psycopg2` package instead to avoid binary compatibility issues:
+> ```bash
+> pip install psycopg2  # Requires system PostgreSQL libraries
+> ```
+
 Homebrew install from the dedicated tap:
 
 ```bash

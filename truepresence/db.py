@@ -44,9 +44,23 @@ def _build_database_url() -> str:
     )
 
 
-DATABASE_URL = _build_database_url() if any(
-    k in os.environ for k in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
-) else None
+DATABASE_URL: str | None = None
+
+
+def get_database_url() -> str:
+    """Lazily build and return the database URL."""
+    global DATABASE_URL
+    if DATABASE_URL is None:
+        DATABASE_URL = _build_database_url()
+    return DATABASE_URL
+
+
+def _database_configured() -> bool:
+    """Check if database is configured without raising."""
+    return any(
+        key in os.environ
+        for key in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
+    )
 
 
 # Global pool instance
@@ -55,7 +69,7 @@ _pool = None
 def _get_pool():
     global _pool
     if _pool is None:
-        url = _build_database_url()
+        url = get_database_url()
         _pool = ThreadedConnectionPool(
             minconn=1,
             maxconn=20,
@@ -86,15 +100,16 @@ def get_db():
 def init_db():
     """
     Initialize database schema.
-    Creates tables if they don't exist — safe to run on every startup.
+    DEPRECATED: Use 'alembic upgrade head' instead.
     """
+    logger.warning("init_db() is deprecated. Please use alembic upgrade head.")
     schema = """
     CREATE TABLE IF NOT EXISTS users (
         id          SERIAL PRIMARY KEY,
         email       VARCHAR(255) UNIQUE NOT NULL,
         name        VARCHAR(255) NOT NULL,
         password    VARCHAR(255) NOT NULL,
-        role        VARCHAR(50)  NOT NULL DEFAULT 'reviewer',
+        role        VARCHAR(50)  NOT NULL DEFAULT 'reviewer' CHECK (role IN ('super_admin', 'reviewer', 'observer')),
         tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
         active      BOOLEAN      NOT NULL DEFAULT TRUE,
         created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
@@ -103,15 +118,15 @@ def init_db():
 
     CREATE TABLE IF NOT EXISTS user_warnings (
         id          SERIAL PRIMARY KEY,
-        user_id     BIGINT NOT NULL,
+        user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
         reason      TEXT,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS telegram_bot_tokens (
-        bot_token   TEXT PRIMARY KEY,
-        tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default'
+        tenant_id   VARCHAR(100) PRIMARY KEY DEFAULT 'default',
+        bot_token   TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS telegram_protected_groups (
@@ -145,8 +160,11 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_users_role      ON users(role);
     CREATE INDEX IF NOT EXISTS idx_warns_user_tenant ON user_warnings(user_id, tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_reviews_status ON telegram_pending_reviews(status);
+    CREATE INDEX IF NOT EXISTS idx_reviews_created ON telegram_pending_reviews(created_at);
+    CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON telegram_user_sessions(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_updated ON telegram_user_sessions(updated_at);
     """
-
 
     with get_db() as conn:
         with conn.cursor() as cur:

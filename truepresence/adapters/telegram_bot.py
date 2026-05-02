@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
 
 from truepresence.adapters.telegram import TelegramAdapter
 from truepresence.core.runtime import (
@@ -31,6 +32,13 @@ from truepresence.core.runtime import (
 from truepresence.db import get_db
 from truepresence.exceptions import TruePresenceError
 from truepresence.surfaces.telegram.adapter import TelegramGuardAdapter
+from truepresence.utils.encryption import decrypt_value, encrypt_value
+
+
+class BotTokenRequest(BaseModel):
+    """Request model for storing encrypted bot tokens."""
+    tenant_id: str = "default"
+    bot_token: str
 
 # Configure logging - CRITICAL systems must log
 logging.basicConfig(
@@ -160,8 +168,6 @@ class TelegramProtectionService:
         self.tenant_created = datetime.now(timezone.utc).isoformat()
 
     async def _bot_token_for_tenant(self, tenant_id: str) -> str | None:
-        # This remains for internal use (e.g. sending messages)
-        # Now delegated to _resolve_token_sync for internal callers
         return self._resolve_token_sync(tenant_id)
 
     def _resolve_token_sync(self, tenant_id: str) -> str | None:
@@ -174,7 +180,16 @@ class TelegramProtectionService:
                     )
                     row = cur.fetchone()
                     if row:
-                        return row["bot_token"]
+                        stored_token = row["bot_token"]
+                        try:
+                            return decrypt_value(stored_token)
+                        except Exception as exc:
+                            logger.warning(
+                                "[%s] Stored bot token decrypt failed; using stored value as plaintext fallback: %s",
+                                tenant_id,
+                                exc,
+                            )
+                            return stored_token
         except Exception as exc:
             logger.warning("[%s] Token DB lookup unavailable; falling back to environment: %s", tenant_id, exc)
         return os.environ.get(f"TELEGRAM_BOT_TOKEN_{tenant_id.upper()}") or os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -184,12 +199,17 @@ class TelegramProtectionService:
         def _sync_fetch():
             with get_db() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT tenant_id FROM telegram_bot_tokens WHERE bot_token = %s", 
-                        (bot_token,)
-                    )
-                    row = cur.fetchone()
-                    return row["tenant_id"] if row else None
+                    cur.execute("SELECT tenant_id, bot_token FROM telegram_bot_tokens")
+                    for row in cur.fetchall():
+                        stored_token = row["bot_token"]
+                        candidate = stored_token
+                        try:
+                            candidate = decrypt_value(stored_token)
+                        except Exception:
+                            pass
+                        if candidate == bot_token:
+                            return row["tenant_id"]
+                    return None
         
         try:
             tenant_id = await asyncio.to_thread(_sync_fetch)
@@ -995,6 +1015,25 @@ async def telegram_webhook(bot_token: str, request: Request):
 
 
 # Admin endpoints
+@router.post("/tokens", dependencies=[Depends(require_telegram_admin)])
+async def store_bot_token(request: BotTokenRequest):
+    """Store encrypted bot token for a tenant (admin only)."""
+    encrypted_token = encrypt_value(request.bot_token)
+
+    def _sync_store():
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO telegram_bot_tokens (tenant_id, bot_token)
+                       VALUES (%s, %s)
+                       ON CONFLICT (tenant_id) DO UPDATE SET bot_token = EXCLUDED.bot_token""",
+                    (request.tenant_id, encrypted_token)
+                )
+
+    await asyncio.to_thread(_sync_store)
+    return {"status": "success", "tenant_id": request.tenant_id}
+
+
 @router.get("/status", dependencies=[Depends(require_telegram_admin)])
 async def get_status(request: Request):
     """Get protection service status for a tenant."""

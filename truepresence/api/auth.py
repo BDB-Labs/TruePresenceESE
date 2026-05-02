@@ -7,10 +7,8 @@ Roles: super_admin | reviewer | observer
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
-import json
 import logging
 import os
 import secrets
@@ -19,9 +17,12 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError as JoseJWTError
+from jose import jwt
 from pydantic import BaseModel
 
 from truepresence.db import get_db
+from truepresence.runtime.distributed import DistributedRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +37,6 @@ ROLE_HIERARCHY = {
     "reviewer": 2,
     "observer": 1,
 }
-
-
-class JWTError(Exception):
-    """Raised when a JWT cannot be decoded or verified."""
 
 
 def _is_explicit_development_mode() -> bool:
@@ -70,47 +67,13 @@ def resolve_jwt_secret() -> str:
 
 
 SECRET_KEY = resolve_jwt_secret()
+
+
+def get_secret_key() -> str:
+    return SECRET_KEY
+
+
 bearer_scheme = HTTPBearer()
-
-
-def _b64url_encode(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-def _b64url_decode(value: str) -> bytes:
-    padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(value + padding)
-
-
-def _jwt_encode(payload: Dict[str, Any], secret: str) -> str:
-    header = {"alg": ALGORITHM, "typ": "JWT"}
-    serializable = dict(payload)
-    exp = serializable.get("exp")
-    if isinstance(exp, datetime):
-        serializable["exp"] = int(exp.timestamp())
-    header_segment = _b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    payload_segment = _b64url_encode(json.dumps(serializable, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    signing_input = f"{header_segment}.{payload_segment}".encode("ascii")
-    signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-    return f"{header_segment}.{payload_segment}.{_b64url_encode(signature)}"
-
-
-def _jwt_decode(token: str, secret: str) -> Dict[str, Any]:
-    try:
-        header_segment, payload_segment, signature_segment = token.split(".")
-    except ValueError as exc:
-        raise JWTError("Malformed token") from exc
-
-    signing_input = f"{header_segment}.{payload_segment}".encode("ascii")
-    expected_signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-    if not hmac.compare_digest(expected_signature, _b64url_decode(signature_segment)):
-        raise JWTError("Invalid signature")
-
-    payload = json.loads(_b64url_decode(payload_segment))
-    exp = payload.get("exp")
-    if exp is not None and int(exp) < int(datetime.now(timezone.utc).timestamp()):
-        raise JWTError("Token expired")
-    return payload
 
 
 def _hash_password_fallback(password: str) -> str:
@@ -185,18 +148,36 @@ def create_token(user_id: int, email: str, role: str, tenant_id: str) -> str:
         "tenant_id": tenant_id,
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
     }
-    return _jwt_encode(payload, SECRET_KEY)
+    return jwt.encode(payload, get_secret_key(), algorithm=ALGORITHM)
+
+
+def get_limiter():
+    """Get rate limiter from app state."""
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+
+    return Limiter(key_func=get_remote_address)
 
 
 def decode_token(token: str) -> dict:
     try:
-        return _jwt_decode(token, SECRET_KEY)
-    except JWTError as exc:
+        return jwt.decode(token, get_secret_key(), algorithms=[ALGORITHM])
+    except JoseJWTError as exc:
         logger.warning("Token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
 
 def _load_current_user_record(user_id: str) -> Dict[str, Any]:
+    # Try cache first
+    try:
+        dist = DistributedRuntime()
+        cache_key = f"user_cache:{user_id}"
+        cached_user = dist.load_session(cache_key)
+        if cached_user:
+            return cached_user
+    except Exception as e:
+        logger.warning("User cache miss or error: %s", e)
+
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -213,7 +194,17 @@ def _load_current_user_record(user_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="User is no longer valid")
     if not user["active"]:
         raise HTTPException(status_code=401, detail="User account is inactive")
-    return dict(user)
+
+    user_dict = dict(user)
+
+    # Store in cache for 1 hour
+    try:
+        dist = DistributedRuntime()
+        dist.store_session(f"user_cache:{user_id}", user_dict)
+    except Exception:
+        pass
+
+    return user_dict
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:  # noqa: B008
@@ -327,9 +318,17 @@ def list_users():
 @router.patch("/users/{user_id}", dependencies=[Depends(require_role("super_admin"))])
 def update_user(user_id: int, request: UpdateUserRequest):
     """Update user role, active status, or tenant — super_admin only."""
+    VALID_USER_COLUMNS = {"name", "role", "active", "tenant_id"}
+
     fields = {k: v for k, v in request.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Filter to only valid columns
+    fields = {k: v for k, v in fields.items() if k in VALID_USER_COLUMNS}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
     if "role" in fields and fields["role"] not in ROLE_HIERARCHY:
         raise HTTPException(status_code=400, detail=f"Invalid role: {fields['role']}")
 
@@ -346,6 +345,13 @@ def update_user(user_id: int, request: UpdateUserRequest):
 
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Invalidate cache
+    try:
+        DistributedRuntime().delete_session(f"user_cache:{user_id}")
+    except Exception:
+        pass
+
     return dict(updated)
 
 
@@ -362,5 +368,12 @@ def deactivate_user(user_id: int):
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Invalidate cache
+    try:
+        DistributedRuntime().delete_session(f"user_cache:{user_id}")
+    except Exception:
+        pass
+
     logger.info("Deactivated user: %s", user["email"])
     return {"status": "deactivated", "user_id": user_id}

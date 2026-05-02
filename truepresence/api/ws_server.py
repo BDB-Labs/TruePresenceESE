@@ -5,7 +5,10 @@ from collections import defaultdict
 from typing import Dict, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from jose import JWTError as JoseJWTError
+from jose import jwt
 
+from truepresence.api.auth import ALGORITHM, get_secret_key
 from truepresence.challenges.deterministic import stable_index
 from truepresence.challenges.validator import ChallengeValidator
 from truepresence.core.runtime import decision_engine as shared_decision_engine
@@ -31,19 +34,32 @@ CHALLENGE_PROMPTS = [
     "Immediately describe your environment in one sentence.",
 ]
 
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    # Validate JWT token from query parameter
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing authentication token")
+        return
+
+    try:
+        jwt.decode(token, get_secret_key(), algorithms=[ALGORITHM])
+    except JoseJWTError:
+        await websocket.close(code=4001, reason="Invalid or expired token")
+        return
+
     await websocket.accept()
     connections[session_id].append(websocket)
-    
+
     # Get session mode (default to "production" if not set)
     session_mode = session_modes.get(session_id, "production")
-    
+
     await websocket.send_json({
         "type": "welcome",
         "data": {"session_id": session_id, "message": "TruePresence Connected to ESE Ensemble", "mode": session_mode}
     })
-    
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -52,18 +68,18 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             except json.JSONDecodeError as e:
                 await websocket.send_json({"type": "error", "message": f"Invalid JSON: {e}"})
                 continue
-            
+
             # Handle mode setting (for test/gatekeeper modes)
             if event.get("event_type") == "set_mode":
                 session_mode = event.get("payload", {}).get("mode", "production")
                 session_modes[session_id] = session_mode
                 continue
-            
+
             # 1. Handle Challenge Responses (Phase 2)
             if event.get("event_type") == "challenge_response":
                 response_text = event.get("payload", {}).get("text", "")
                 val_result = validator.validate_response(session_id, response_text)
-                
+
                 event = {
                     "event_type": "challenge_result",
                     "payload": val_result
@@ -82,7 +98,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 event=event,
             ).to_response()
             trust_score = result.get("human_probability", 0.5)
-            
+
             # 3. Self-Evaluation for Test Mode (Red Team Integration)
             if session_mode == "test" and event.get("attack_type"):
                 # Evaluate as attack and compute reward
@@ -91,7 +107,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     events=[event],
                     ground_truth=True  # Known attack in test mode
                 )
-                
+
                 # Send reward feedback to client for monitoring
                 await websocket.send_json({
                     "type": "reward_update",
@@ -100,7 +116,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         "performance": redteam_evaluator.get_performance()
                     }
                 })
-            
+
             # 3. Trust Update
             await websocket.send_json({"type": "trust_update", "data": result})
 
@@ -109,7 +125,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             current_time = time.time()
             last_challenge_time = challenge_last_issued.get(session_id, 0)
             time_since_last_challenge = current_time - last_challenge_time
-            
+
             if 0.35 < score < 0.75 and time_since_last_challenge >= CHALLENGE_COOLDOWN_SECONDS:
                 challenge = {
                     "id": str(uuid.uuid4()),
@@ -123,7 +139,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "type": "challenge",
                     "challenge": challenge
                 })
-                
+
     except WebSocketDisconnect:
         if session_id in connections:
             connections[session_id].remove(websocket)

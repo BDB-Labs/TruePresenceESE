@@ -142,7 +142,7 @@ class TruePresenceDecisionEngine:
                         ) from exc
                     ensemble_runtime = _NoOpEnsembleRuntime(exc)
         self.ensemble_runtime = ensemble_runtime
-        self.artifact_store = artifact_store or ArtifactStore()
+        self.artifact_store = artifact_store or ArtifactStore(distributed_runtime=self.ensemble_runtime)
 
     def evaluate(
         self,

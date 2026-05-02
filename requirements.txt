@@ -21,6 +21,8 @@ requests==2.33.1
 psycopg2-binary==2.9.11
 passlib[bcrypt]==1.7.4
 python-jose[cryptography]==3.5.0
+slowapi==0.1.9
+alembic==1.18.4
 python-multipart==0.0.26
 certifi==2026.2.25
 urllib3==2.6.3
