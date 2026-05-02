@@ -1,0 +1,27 @@
+contract_version: 1
+key: truepresence
+title: TruePresence
+summary: ESE pack for TruePresence liveness, relay, AI-mediation, and trust synthesis workflows.
+preset: strict
+goal_profile: high-quality
+roles:
+  - key: liveness_analyst
+    responsibility: Evaluate whether interaction telemetry supports live human presence.
+    prompt_file: prompts/liveness_analyst.md
+    temperature: 0.2
+  - key: relay_analyst
+    responsibility: Identify relay, proxy, or remote-control indicators in session timing and challenge responses.
+    prompt_file: prompts/relay_analyst.md
+    temperature: 0.2
+  - key: ai_mediation_analyst
+    responsibility: Assess evidence of AI-assisted or automated mediation in the interaction.
+    prompt_file: prompts/ai_mediation_analyst.md
+    temperature: 0.2
+  - key: adversarial_reviewer
+    responsibility: Challenge optimistic interpretations and look for bypass strategies or contradictory evidence.
+    prompt_file: prompts/adversarial_reviewer.md
+    temperature: 0.2
+  - key: trust_synthesizer
+    responsibility: Synthesize role findings into a concise trust decision with clear evidence and uncertainty.
+    prompt_file: prompts/trust_synthesizer.md
+    temperature: 0.1

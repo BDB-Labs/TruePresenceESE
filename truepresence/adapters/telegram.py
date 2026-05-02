@@ -19,7 +19,7 @@ from truepresence.exceptions import EvidenceError
 logger = logging.getLogger(__name__)
 
 # Rate limiting for ban actions
-_ban_actions: Dict[str, float] = {}  # user_id -> timestamp
+_ban_actions: Dict[str, float] = {}  # tenant_id:user_id -> timestamp
 BAN_COOLDOWN_SECONDS = 60  # Minimum seconds between ban actions per user
 
 
@@ -211,13 +211,7 @@ class TelegramAdapter:
         
         # Standardize to Unix timestamp for internal processing
         msg_timestamp = message.get("date", time.time())
-        
-        message_times = self._user_message_times[user_id]
-
-        while message_times and msg_timestamp - message_times[0] > 60:
-            message_times.popleft()
-        message_times.append(msg_timestamp)
-        message_velocity = len(message_times)
+        message_velocity = self._calc_message_velocity(user_id, msg_timestamp)
 
         # Calculate content similarity (avg Jaccard against last 10 messages)
         content_similarity = self._calc_content_similarity(user_id, text)
@@ -428,6 +422,18 @@ class TelegramAdapter:
             freq[c] = freq.get(c, 0) + 1
         entropy = -sum(f/len(text) * math.log2(f/len(text)) for f in freq.values() if f > 0)
         return round(entropy, 2)
+
+    def _calc_message_velocity(self, user_id: str, timestamp: float) -> float:
+        """Calculate messages-per-minute for this user over a rolling 60-second window."""
+        if not user_id:
+            return 0.0
+        now = float(timestamp or time.time())
+        recent = self._user_message_times[user_id]
+        recent.append(now)
+        cutoff = now - 60
+        while recent and recent[0] < cutoff:
+            recent.popleft()
+        return round(len(recent), 3)
     
     def _get_warning_count(self, user_id: int) -> int:
         """Get number of previous warnings for this user from database."""
@@ -455,7 +461,8 @@ class TelegramAdapter:
         
         # Check rate limit for ban actions
         if user_id is not None:
-            last_ban_time = _ban_actions.get(user_id, 0)
+            ban_key = f"{tenant_id}:{user_id}"
+            last_ban_time = _ban_actions.get(ban_key, 0)
             if current_time - last_ban_time < BAN_COOLDOWN_SECONDS:
                 logger.info(f"Rate-limited ban for user {user_id}, downgrading to alert")
                 return TelegramAction(
@@ -597,7 +604,7 @@ class TelegramAdapter:
         if state == "EJECT":
             # Track ban action for rate limiting
             if user_id is not None:
-                _ban_actions[user_id] = current_time
+                _ban_actions[f"{tenant_id}:{user_id}"] = current_time
             return {
                 "action": "ban",
                 "reason": block_reason or "Deterministic policy violation",
@@ -634,7 +641,7 @@ class TelegramAdapter:
             # Any confirmed threat category = immediate block (with rate limiting)
             if confidence > 0.6:
                 if user_id is not None:
-                    _ban_actions[user_id] = current_time
+                    _ban_actions[f"{tenant_id}:{user_id}"] = current_time
                 return {
                     "action": "ban",
                     "reason": block_reason or f"Threat detected: {', '.join(threat_categories)}",
@@ -645,7 +652,7 @@ class TelegramAdapter:
         
         if decision == "block" and confidence > 0.8:
             if user_id is not None:
-                _ban_actions[user_id] = current_time
+                _ban_actions[f"{tenant_id}:{user_id}"] = current_time
             return {
                 "action": "ban",
                 "reason": block_reason or f"Bot detected ({human_prob:.0%} human probability)",

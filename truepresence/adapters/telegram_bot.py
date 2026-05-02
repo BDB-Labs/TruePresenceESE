@@ -8,12 +8,14 @@ CRITICAL: This system does NOT fail silently.
 """
 
 import asyncio
+import html
 import json
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -43,6 +45,17 @@ TELEGRAM_API_BASE = "https://api.telegram.org/bot"
 # Global HTTP client to prevent socket exhaustion
 _http_client: Optional[httpx.AsyncClient] = None
 
+
+class AwaitableList(list):
+    """List result that can also be awaited by async route handlers."""
+
+    def __await__(self):
+        async def _return_self():
+            return self
+
+        return _return_self().__await__()
+
+
 def get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
@@ -52,9 +65,18 @@ def get_http_client() -> httpx.AsyncClient:
         )
     return _http_client
 
+@asynccontextmanager
+async def telegram_router_lifespan(_app):
+    try:
+        yield
+    finally:
+        services = globals().get("tenant_services", {})
+        await asyncio.gather(*(svc.close() for svc in services.values()))
+
+
 # Use router instead of separate app
-router = APIRouter(prefix="/telegram", tags=["telegram"])
-telegram_bearer = HTTPBearer()
+router = APIRouter(prefix="/telegram", tags=["telegram"], lifespan=telegram_router_lifespan)
+telegram_bearer = HTTPBearer(auto_error=False)
 
 
 def _tenant_id_from_request(request: Request) -> str:
@@ -68,11 +90,25 @@ def _webhook_secret_for_tenant(tenant_id: str) -> str | None:
 def _verify_webhook_secret(request: Request, tenant_id: str) -> None:
     expected = _webhook_secret_for_tenant(tenant_id)
     if expected and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != expected:
-        raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
+        raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
 
 
-def require_telegram_admin(credentials: HTTPAuthorizationCredentials = Depends(telegram_bearer)) -> dict:  # noqa: B008
-    """Require a super-admin token for Telegram management endpoints."""
+def require_telegram_admin(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(telegram_bearer),  # noqa: B008
+) -> dict:
+    """Require either a JWT super-admin or configured tenant admin token."""
+    tenant_id = _tenant_id_from_request(request)
+    expected_admin_token = os.environ.get(f"ADMIN_API_TOKEN_{tenant_id.upper()}") or os.environ.get("ADMIN_API_TOKEN")
+    if expected_admin_token:
+        provided_admin_token = request.headers.get("X-Admin-Token")
+        if provided_admin_token == expected_admin_token:
+            return {"role": "super_admin", "tenant_id": tenant_id, "auth": "admin_token"}
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     from truepresence.api.auth import ROLE_HIERARCHY, get_current_user
 
     user = get_current_user(credentials)
@@ -115,8 +151,9 @@ class TelegramProtectionService:
         self.pending_reviews: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self.admin_chats: Dict[str, set[int]] = {}
         self.protected_groups: Dict[str, set[int]] = {}
-        
-        self.http_client = httpx.AsyncClient()
+
+        self.bot_token = os.environ.get(f"TELEGRAM_BOT_TOKEN_{tenant_id.upper()}") or os.environ.get("TELEGRAM_BOT_TOKEN")
+        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
         
         # Tenant metadata
         self.tenant_name = os.environ.get(f"TENANT_NAME_{tenant_id.upper()}", tenant_id)
@@ -193,6 +230,32 @@ class TelegramProtectionService:
         self.tenant_adapters[tenant_id] = adapter
         self.tenant_guard_adapters[tenant_id] = TelegramGuardAdapter(self.decision_engine, response_adapter=adapter)
         return normalized
+
+    async def close(self):
+        """Close external clients held by this service."""
+        await self.http_client.aclose()
+
+    async def _post_telegram_api(self, url: str, payload: Dict[str, Any], retries: int = 2) -> httpx.Response:
+        """Post to Telegram API with lightweight retry/backoff for transient failures."""
+        delay = 0.25
+        last_exc: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                response = await self.http_client.post(url, json=payload)
+                if response.status_code >= 500 and attempt < retries:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+                return response
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                last_exc = exc
+                if attempt >= retries:
+                    raise
+                await asyncio.sleep(delay)
+                delay *= 2
+        if last_exc is not None:
+            raise last_exc
+        return await self.http_client.post(url, json=payload)
 
     def _load_tenant_config(self, tenant_id: str) -> Dict[str, Any]:
         """Load tenant-specific configuration from environment variables."""
@@ -296,7 +359,7 @@ class TelegramProtectionService:
             return {"status": "skipped", "action": action_type}
 
         try:
-            response = await self.http_client.post(url, json=payload)
+            response = await self._post_telegram_api(url, payload)
             success = response.status_code == 200
             outcome = {
                 "status": "success" if success else "failed",
@@ -560,7 +623,7 @@ class TelegramProtectionService:
             logger.warning("[%s] Pending review DB insert unavailable; using in-memory review store: %s", tenant_id, exc)
         return review_id
 
-    async def get_pending_reviews(self, tenant_id: str = None) -> List[Dict[str, Any]]:
+    def get_pending_reviews(self, tenant_id: str = None) -> AwaitableList:
         """Get all pending manual reviews for a tenant."""
         tenant_id = tenant_id or self.tenant_id
         def _sync_get():
@@ -573,14 +636,14 @@ class TelegramProtectionService:
                     rows = cur.fetchall()
                     return [json.loads(r["data"]) for r in rows]
         try:
-            return await asyncio.to_thread(_sync_get)
+            return AwaitableList(_sync_get())
         except Exception as exc:
             logger.warning("[%s] Pending review DB lookup unavailable; using in-memory review store: %s", tenant_id, exc)
-            return [
+            return AwaitableList([
                 dict(review)
                 for review in self.pending_reviews.get(tenant_id, {}).values()
                 if review.get("status") == "pending"
-            ]
+            ])
 
     async def get_review(self, review_id: str, tenant_id: str = None) -> Optional[Dict[str, Any]]:
         """Get one manual review, regardless of status."""
@@ -732,7 +795,7 @@ class TelegramProtectionService:
             }
         
         try:
-            response = await self.http_client.post(url, json=payload)
+            response = await self._post_telegram_api(url, payload)
             
             if response.status_code != 200:
                 error_msg = f"Telegram API error: {response.text}"
@@ -769,16 +832,17 @@ class TelegramProtectionService:
         
         try:
             # Create review data
+            source_message = update.get("message") or update.get("edited_message") or {}
             review_data = {
                 "action": action,
                 "update": update,
                 "evaluation": result,
-                "user_info": update.get("message", {}).get("from", {}),
-                "chat_info": update.get("message", {}).get("chat", {}),
-                "message_text": update.get("message", {}).get("text", ""),
+                "user_info": source_message.get("from", {}),
+                "chat_info": source_message.get("chat", {}),
+                "message_text": source_message.get("text", ""),
                 "threat_categories": result["final"].get("threat_categories", []),
                 "risk_factors": result["final"].get("risk_factors", []),
-                "original_message": update.get("message", {})
+                "original_message": source_message
             }
             
             # Add to pending reviews (tenant-isolated)
@@ -816,9 +880,9 @@ class TelegramProtectionService:
                 f"🚨 [{tenant_id}] MANUAL REVIEW REQUIRED 🚨\n\n"
                 f"📝 Review ID: {review_id}\n"
                 f"🏢 Tenant: {tenant_id}\n"
-                f"👤 User: {user_info.get('username', 'N/A')} (ID: {user_info.get('id', 'N/A')})\n"
-                f"💬 Chat: {chat_info.get('title', 'Private')} (ID: {chat_info.get('id', 'N/A')})\n"
-                f"📱 Message: {review_data['message_text'][:100]}...\n"
+                f"👤 User: {html.escape(str(user_info.get('username', 'N/A')))} (ID: {user_info.get('id', 'N/A')})\n"
+                f"💬 Chat: {html.escape(str(chat_info.get('title', 'Private')))} (ID: {chat_info.get('id', 'N/A')})\n"
+                f"📱 Message: {html.escape(str(review_data['message_text'])[:100])}...\n"
                 f"⚠️  Threats: {', '.join(review_data['threat_categories'])}\n"
                 f"🔍 Confidence: {review_data['action'].get('confidence', 0):.2f}"
                 f"{review_link}"
@@ -833,7 +897,7 @@ class TelegramProtectionService:
                 "disable_web_page_preview": True
             }
             
-            response = await self.http_client.post(url, json=payload)
+            response = await self._post_telegram_api(url, payload)
             
             if response.status_code != 200:
                 logger.error(f"[{tenant_id}] Failed to send Telegram notification: {response.text}")
@@ -849,6 +913,14 @@ service = TelegramProtectionService(
     orchestrator=shared_orchestrator,
     decision_engine=shared_decision_engine
 )
+tenant_services: Dict[str, TelegramProtectionService] = {"default": service}
+
+
+def get_service_for_tenant(tenant_id: str) -> TelegramProtectionService:
+    """Get or create a tenant-scoped service instance."""
+    if tenant_id not in tenant_services:
+        tenant_services[tenant_id] = TelegramProtectionService(tenant_id=tenant_id)
+    return tenant_services[tenant_id]
 
 
 # Exception handlers - CRITICAL: No silent failures
@@ -893,13 +965,13 @@ async def telegram_webhook(bot_token: str, request: Request):
         tenant_id = await service._resolve_tenant_from_token(bot_token)
         if not tenant_id:
             raise HTTPException(status_code=404, detail="Bot token not recognized")
-            
+        tenant_service = get_service_for_tenant(tenant_id)
         _verify_webhook_secret(request, tenant_id)
         
         logger.info(f"[{tenant_id}] Received Telegram update: {update.get('update_id')}")
         
         # Use the module-level singleton — NOT a fresh instance per request
-        action = await service.process_update(update, tenant_id=tenant_id)
+        action = await tenant_service.process_update(update, tenant_id=tenant_id)
         
         if not action:
             return {"ok": True, "action": "ignored"}
@@ -914,6 +986,8 @@ async def telegram_webhook(bot_token: str, request: Request):
             "tenant_id": tenant_id
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Telegram webhook processing failed") from e
@@ -928,8 +1002,7 @@ async def get_status(request: Request):
     show_all = request.query_params.get("all", "false").lower() == "true"
     if show_all and tenant_id == "default":
         return await service.get_status("all")
-    else:
-        return await service.get_status(tenant_id)
+    return await service.get_status(tenant_id)
 
 
 @router.post("/groups/{group_id}/protect", dependencies=[Depends(require_telegram_admin)])
@@ -975,9 +1048,12 @@ async def resolve_review(review_id: str, resolution: Dict[str, Any], request: Re
     
     admin_decision = resolution.get("decision")  # "allow", "ban", "kick", "warn"
     admin_notes = resolution.get("notes", "")
+    valid_decisions = {"allow", "ban", "kick", "warn", "delete"}
     
     if not admin_decision:
         raise HTTPException(status_code=400, detail="Decision is required")
+    if admin_decision not in valid_decisions:
+        raise HTTPException(status_code=400, detail=f"Invalid decision: {admin_decision}")
         
     success = await service.resolve_review(review_id, admin_decision, admin_notes, tenant_id)
     
@@ -1055,7 +1131,7 @@ async def configure_detectors(request: Request, config: Dict[str, Any]):
 
 
 @router.get("/config/options", dependencies=[Depends(require_telegram_admin)])
-async def get_configuration_options():
+async def get_configuration_options(request: Request):
     """Get available configuration options."""
     return {
         "detectors": {
@@ -1103,9 +1179,10 @@ async def run_audit(group_id: int, request: Request):
     
     Scans all members and identifies bots.
     """
+    tenant_id = _tenant_id_from_request(request)
     # Placeholder - would implement full audit logic
     return {
-        "tenant_id": _tenant_id_from_request(request),
+        "tenant_id": tenant_id,
         "group_id": group_id,
         "status": "audit_queued",
         "estimated_time": "5 minutes"
@@ -1119,7 +1196,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "TelegramProtection",
-        "truepresence_version": "1.0.0"
+        "truepresence_version": os.environ.get("TRUEPRESENCE_VERSION", "1.0.0")
     }
 
 

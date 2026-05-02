@@ -44,7 +44,10 @@ truepresence = "truepresence.main:main"
 ese = "ese.cli:app"
 
 [tool.setuptools.packages.find]
-include = ["truepresence*", "ese*"]
+include = ["truepresence*", "ese*", "ese_core*"]
+
+[tool.setuptools.package-data]
+"truepresence.ese_bundle" = ["*.yaml", "prompts/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
