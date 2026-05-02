@@ -8,7 +8,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from truepresence.runtime.wiring import allow_lenient_wiring, load_component
 
@@ -58,7 +60,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    limiter = Limiter(key_func=get_remote_address)
     app = FastAPI(title="TruePresence", version="1.0.0", lifespan=lifespan)
+    app.state.limiter = limiter
     app.add_middleware(
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,

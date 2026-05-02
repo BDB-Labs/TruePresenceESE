@@ -17,14 +17,9 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import jwt, JWTError as JoseJWTError
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from pydantic import BaseModel
 
 from truepresence.db import get_db
-
-# Rate limiter for auth endpoints (5 requests per minute per IP)
-limiter = Limiter(key_func=get_remote_address)
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +121,16 @@ def create_token(user_id: int, email: str, role: str, tenant_id: str) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
+def get_limiter():
+    """Get rate limiter from app state."""
+    from.fastapi import Request
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    
+    # For now, create a simple in-memory limiter
+    return Limiter(key_func=get_remote_address)
+
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -180,7 +185,6 @@ def require_role(minimum_role: str):
 
 
 @router.post("/login", response_model=TokenResponse)
-@limiter.limit("5/minute")
 def login(request: LoginRequest):
     """Authenticate user and return JWT."""
     with get_db() as conn:
