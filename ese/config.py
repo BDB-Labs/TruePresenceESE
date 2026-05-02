@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Optional
 
 import yaml
 from pydantic import (
@@ -36,8 +36,8 @@ class ProviderConfig(BaseModel):
 
     name: str
     model: str
-    api_key_env: str | None = None
-    base_url: str | None = None
+    api_key_env: Optional[str] = None
+    base_url: Optional[str] = None
 
     @field_validator("name", "model")
     @classmethod
@@ -49,7 +49,7 @@ class ProviderConfig(BaseModel):
 
     @field_validator("api_key_env", "base_url")
     @classmethod
-    def _optional_non_empty(cls, value: str | None) -> str | None:
+    def _optional_non_empty(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
         cleaned = value.strip()
@@ -61,14 +61,14 @@ class ProviderConfig(BaseModel):
 class RoleConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    provider: str | None = None
-    model: str | None = None
-    temperature: float | None = None
-    prompt: str | None = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    prompt: Optional[str] = None
 
     @field_validator("provider", "model", "prompt")
     @classmethod
-    def _optional_non_empty(cls, value: str | None) -> str | None:
+    def _optional_non_empty(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
         cleaned = value.strip()
@@ -82,8 +82,8 @@ class ConstraintsConfig(BaseModel):
 
     disallow_same_model_pairs: list[tuple[str, str]] = Field(default_factory=list)
     require_roles: list[str] = Field(default_factory=list)
-    minimum_distinct_models: int | None = None
-    minimum_specialist_roles: int | None = None
+    minimum_distinct_models: Optional[int] = None
+    minimum_specialist_roles: Optional[int] = None
     disallow_same_provider_pairs: list[tuple[str, str]] = Field(default_factory=list)
     require_json_for_roles: list[str] = Field(default_factory=list)
 
@@ -104,7 +104,7 @@ class ConstraintsConfig(BaseModel):
 
     @field_validator("minimum_distinct_models")
     @classmethod
-    def _validate_minimum_distinct_models(cls, value: int | None) -> int | None:
+    def _validate_minimum_distinct_models(cls, value: Optional[int]) -> Optional[int]:
         if value is None:
             return value
         if value <= 0:
@@ -113,7 +113,7 @@ class ConstraintsConfig(BaseModel):
 
     @field_validator("minimum_specialist_roles")
     @classmethod
-    def _validate_minimum_specialist_roles(cls, value: int | None) -> int | None:
+    def _validate_minimum_specialist_roles(cls, value: Optional[int]) -> Optional[int]:
         if value is None:
             return value
         if value < 0:
@@ -169,12 +169,12 @@ def _normalize_role_list(value: Any) -> list[str]:
 class InputConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    scope: str | None = None
-    prompt: str | None = None
+    scope: Optional[str] = None
+    prompt: Optional[str] = None
 
     @field_validator("scope", "prompt")
     @classmethod
-    def _optional_non_empty(cls, value: str | None) -> str | None:
+    def _optional_non_empty(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
         cleaned = value.strip()
@@ -221,11 +221,11 @@ class OpenAIRuntimeConfig(BaseModel):
 class CustomAPIRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    base_url: str | None = None
+    base_url: Optional[str] = None
 
     @field_validator("base_url")
     @classmethod
-    def _validate_base_url(cls, value: str | None) -> str | None:
+    def _validate_base_url(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
         cleaned = value.strip()
@@ -256,10 +256,10 @@ class RuntimeConfig(BaseModel):
     timeout_seconds: float = 60.0
     max_retries: int = 2
     retry_backoff_seconds: float = 1.0
-    max_output_tokens: int | None = None
+    max_output_tokens: Optional[int] = None
     review_isolation: str = "scope_and_implementation"
     openai: OpenAIRuntimeConfig = Field(default_factory=OpenAIRuntimeConfig)
-    custom_api: CustomAPIRuntimeConfig | None = None
+    custom_api: Optional[CustomAPIRuntimeConfig] = None
     local: LocalRuntimeConfig = Field(default_factory=LocalRuntimeConfig)
 
     @field_validator("adapter")
@@ -292,7 +292,7 @@ class RuntimeConfig(BaseModel):
 
     @field_validator("max_output_tokens")
     @classmethod
-    def _validate_optional_tokens(cls, value: int | None) -> int | None:
+    def _validate_optional_tokens(cls, value: Optional[int]) -> Optional[int]:
         if value is None:
             return value
         if value <= 0:
@@ -317,7 +317,7 @@ class ESEConfig(BaseModel):
     strict_config: bool = False
     provider: ProviderConfig
     roles: dict[str, RoleConfig] = Field(default_factory=dict)
-    role_order: list[str] | None = None
+    role_order: Optional[list[str]] = None
     constraints: ConstraintsConfig = Field(default_factory=ConstraintsConfig)
     input: InputConfig = Field(default_factory=InputConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
@@ -350,7 +350,7 @@ class ESEConfig(BaseModel):
 
     @field_validator("role_order")
     @classmethod
-    def _validate_role_order_shape(cls, value: list[str] | None) -> list[str] | None:
+    def _validate_role_order_shape(cls, value: Optional[list[str]]) -> Optional[list[str]]:
         if value is None:
             return value
 
