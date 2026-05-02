@@ -20,6 +20,7 @@ from jose import jwt, JWTError as JoseJWTError
 from pydantic import BaseModel
 
 from truepresence.db import get_db
+from truepresence.runtime.distributed import DistributedRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,16 @@ def decode_token(token: str) -> dict:
 
 
 def _load_current_user_record(user_id: str) -> Dict[str, Any]:
+    # Try cache first
+    try:
+        dist = DistributedRuntime()
+        cache_key = f"user_cache:{user_id}"
+        cached_user = dist.load_session(cache_key)
+        if cached_user:
+            return cached_user
+    except Exception as e:
+        logger.warning("User cache miss or error: %s", e)
+
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -165,7 +176,17 @@ def _load_current_user_record(user_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="User is no longer valid")
     if not user["active"]:
         raise HTTPException(status_code=401, detail="User account is inactive")
-    return dict(user)
+    
+    user_dict = dict(user)
+    
+    # Store in cache for 1 hour
+    try:
+        dist = DistributedRuntime()
+        dist.store_session(f"user_cache:{user_id}", user_dict)
+    except Exception:
+        pass
+        
+    return user_dict
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:  # noqa: B008
@@ -279,7 +300,6 @@ def list_users():
 @router.patch("/users/{user_id}", dependencies=[Depends(require_role("super_admin"))])
 def update_user(user_id: int, request: UpdateUserRequest):
     """Update user role, active status, or tenant — super_admin only."""
-    # Allowlist valid updateable columns to prevent SQL injection
     VALID_USER_COLUMNS = {"name", "role", "active", "tenant_id"}
     
     fields = {k: v for k, v in request.model_dump().items() if v is not None}
@@ -307,6 +327,13 @@ def update_user(user_id: int, request: UpdateUserRequest):
 
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    # Invalidate cache
+    try:
+        DistributedRuntime().delete_session(f"user_cache:{user_id}")
+    except Exception:
+        pass
+        
     return dict(updated)
 
 
@@ -320,8 +347,15 @@ def deactivate_user(user_id: int):
                 (user_id,),
             )
             user = cur.fetchone()
-
+    
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    # Invalidate cache
+    try:
+        DistributedRuntime().delete_session(f"user_cache:{user_id}")
+    except Exception:
+        pass
+        
     logger.info("Deactivated user: %s", user["email"])
     return {"status": "deactivated", "user_id": user_id}

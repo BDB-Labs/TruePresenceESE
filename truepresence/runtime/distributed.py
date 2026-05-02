@@ -39,11 +39,17 @@ class DistributedRuntime:
         
         if REDIS_AVAILABLE:
             try:
-                self.redis_client = redis.from_url(redis_url, decode_responses=True)
+                # Use a connection pool for better performance and scalability
+                self.pool = redis.ConnectionPool.from_url(
+                    redis_url, 
+                    decode_responses=True,
+                    max_connections=20
+                )
+                self.redis_client = redis.Redis(connection_pool=self.pool)
                 # Test connection
                 self.redis_client.ping()
                 self.available = True
-                logger.info("DistributedRuntime connected to Redis")
+                logger.info("DistributedRuntime connected to Redis with connection pooling")
             except Exception as e:
                 logger.warning(f"Could not connect to Redis: {e}")
                 self.redis_client = None
