@@ -230,7 +230,8 @@ class DistributedRuntime:
             Number of active sessions
         """
         if self.available and self.redis_client:
-            keys = self.redis_client.keys("truepresence:session:*")
+            # Use scan_iter instead of KEYS to avoid blocking Redis
+            keys = list(self.redis_client.scan_iter("truepresence:session:*"))
             return len(keys)
         else:
             return len([k for k in self._memory_store.keys() if "session:" in k])

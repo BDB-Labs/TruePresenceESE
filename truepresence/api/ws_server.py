@@ -5,11 +5,13 @@ from collections import defaultdict
 from typing import Dict, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from jose import jwt, JWTError as JoseJWTError
 
 from truepresence.challenges.deterministic import stable_index
 from truepresence.challenges.validator import ChallengeValidator
 from truepresence.core.runtime import decision_engine as shared_decision_engine
 from truepresence.redteam.evaluate import RedTeamEvaluator
+from truepresence.api.auth import SECRET_KEY, ALGORITHM
 
 router = APIRouter()
 
@@ -31,8 +33,21 @@ CHALLENGE_PROMPTS = [
     "Immediately describe your environment in one sentence.",
 ]
 
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    # Validate JWT token from query parameter
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing authentication token")
+        return
+    
+    try:
+        jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JoseJWTError:
+        await websocket.close(code=4001, reason="Invalid or expired token")
+        return
+    
     await websocket.accept()
     connections[session_id].append(websocket)
     

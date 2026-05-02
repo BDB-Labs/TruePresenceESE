@@ -7,10 +7,7 @@ Roles: super_admin | reviewer | observer
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
-import json
 import logging
 import os
 import secrets
@@ -19,9 +16,15 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import jwt, JWTError as JoseJWTError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from pydantic import BaseModel
 
 from truepresence.db import get_db
+
+# Rate limiter for auth endpoints (5 requests per minute per IP)
+limiter = Limiter(key_func=get_remote_address)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
-DEV_FALLBACK_SECRET = "truepresence-dev-only-jwt-secret"
 
 ROLE_HIERARCHY = {
     "super_admin": 3,
@@ -38,79 +40,15 @@ ROLE_HIERARCHY = {
 }
 
 
-class JWTError(Exception):
-    """Raised when a JWT cannot be decoded or verified."""
-
-
-def _is_explicit_development_mode() -> bool:
-    mode = (
-        os.environ.get("TRUEPRESENCE_ENV")
-        or os.environ.get("APP_ENV")
-        or os.environ.get("ENVIRONMENT")
-        or ""
-    ).strip().lower()
-    return mode in {"dev", "development", "local", "test"}
-
-
-def _allow_dev_jwt_fallback() -> bool:
-    flag = os.environ.get("TRUEPRESENCE_ALLOW_DEV_AUTH", "").strip().lower()
-    return _is_explicit_development_mode() and flag in {"1", "true", "yes", "on"}
-
-
 def resolve_jwt_secret() -> str:
     secret = os.environ.get("JWT_SECRET")
-    if secret:
-        return secret
-    if _allow_dev_jwt_fallback():
-        logger.warning("JWT_SECRET missing; using explicit development fallback secret")
-        return DEV_FALLBACK_SECRET
-    raise RuntimeError(
-        "JWT_SECRET is required. Enable TRUEPRESENCE_ALLOW_DEV_AUTH in explicit development mode only."
-    )
+    if not secret:
+        raise RuntimeError("JWT_SECRET is required and must be set in environment variables.")
+    return secret
 
 
 SECRET_KEY = resolve_jwt_secret()
 bearer_scheme = HTTPBearer()
-
-
-def _b64url_encode(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-def _b64url_decode(value: str) -> bytes:
-    padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(value + padding)
-
-
-def _jwt_encode(payload: Dict[str, Any], secret: str) -> str:
-    header = {"alg": ALGORITHM, "typ": "JWT"}
-    serializable = dict(payload)
-    exp = serializable.get("exp")
-    if isinstance(exp, datetime):
-        serializable["exp"] = int(exp.timestamp())
-    header_segment = _b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    payload_segment = _b64url_encode(json.dumps(serializable, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    signing_input = f"{header_segment}.{payload_segment}".encode("ascii")
-    signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-    return f"{header_segment}.{payload_segment}.{_b64url_encode(signature)}"
-
-
-def _jwt_decode(token: str, secret: str) -> Dict[str, Any]:
-    try:
-        header_segment, payload_segment, signature_segment = token.split(".")
-    except ValueError as exc:
-        raise JWTError("Malformed token") from exc
-
-    signing_input = f"{header_segment}.{payload_segment}".encode("ascii")
-    expected_signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-    if not hmac.compare_digest(expected_signature, _b64url_decode(signature_segment)):
-        raise JWTError("Invalid signature")
-
-    payload = json.loads(_b64url_decode(payload_segment))
-    exp = payload.get("exp")
-    if exp is not None and int(exp) < int(datetime.now(timezone.utc).timestamp()):
-        raise JWTError("Token expired")
-    return payload
 
 
 def _hash_password_fallback(password: str) -> str:
@@ -185,13 +123,13 @@ def create_token(user_id: int, email: str, role: str, tenant_id: str) -> str:
         "tenant_id": tenant_id,
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
     }
-    return _jwt_encode(payload, SECRET_KEY)
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
 def decode_token(token: str) -> dict:
     try:
-        return _jwt_decode(token, SECRET_KEY)
-    except JWTError as exc:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JoseJWTError as exc:
         logger.warning("Token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
@@ -242,6 +180,7 @@ def require_role(minimum_role: str):
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/minute")
 def login(request: LoginRequest):
     """Authenticate user and return JWT."""
     with get_db() as conn:
@@ -327,9 +266,18 @@ def list_users():
 @router.patch("/users/{user_id}", dependencies=[Depends(require_role("super_admin"))])
 def update_user(user_id: int, request: UpdateUserRequest):
     """Update user role, active status, or tenant — super_admin only."""
+    # Allowlist valid updateable columns to prevent SQL injection
+    VALID_USER_COLUMNS = {"name", "role", "active", "tenant_id"}
+    
     fields = {k: v for k, v in request.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Filter to only valid columns
+    fields = {k: v for k, v in fields.items() if k in VALID_USER_COLUMNS}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    
     if "role" in fields and fields["role"] not in ROLE_HIERARCHY:
         raise HTTPException(status_code=400, detail=f"Invalid role: {fields['role']}")
 

@@ -19,6 +19,12 @@ jobs:
           version: "0.9.26"
           python-version: "3.11"
 
+      - name: Install dependencies with test extras
+        run: uv pip install -e ".[dev]"
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
       - name: Build package
         run: uv build
 
