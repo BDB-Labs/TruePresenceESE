@@ -38,33 +38,9 @@ def _get_allowed_origins() -> list[str]:
     return ALLOWED_ORIGINS
 
 
-def _database_configured() -> bool:
-    return any(
-        key in os.environ
-        for key in ["DATABASE_URL", "PGHOST", "POSTGRES_HOST", "POSTGRES_USER"]
-    )
-
-
-def _initialize_database_if_configured() -> None:
-    if not _database_configured():
-        logger.info("Database init skipped: no database environment configured")
-        return
-
-    try:
-        from truepresence.db import init_db
-
-        init_db()
-        logger.info("Database initialized")
-    except Exception as exc:
-        if allow_lenient_wiring():
-            logger.warning("Database init failed in lenient wiring mode: %s", exc)
-            return
-        raise
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, Any]]:
-    _initialize_database_if_configured()
     yield {"status": "shutdown"}
     # Graceful shutdown: close connection pools
     await _cleanup_connections(app)
