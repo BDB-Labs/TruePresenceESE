@@ -141,12 +141,15 @@ def init_db():
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_users_email     ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email     ON users(email);
     CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_users_role      ON users(role);
     CREATE INDEX IF NOT EXISTS idx_warns_user_tenant ON user_warnings(user_id, tenant_id);
-    \"\"\"
-
+    CREATE INDEX IF NOT EXISTS idx_reviews_status ON telegram_pending_reviews(status);
+    CREATE INDEX IF NOT EXISTS idx_reviews_created ON telegram_pending_reviews(created_at);
+    CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON telegram_user_sessions(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_updated ON telegram_user_sessions(updated_at);
+    """
 
     with get_db() as conn:
         with conn.cursor() as cur:
