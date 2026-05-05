@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TruePresence Browser SDK Basic Form</title>
+  </head>
+  <body>
+    <form id="signup-form">
+      <label>
+        Display name
+        <input name="display_name" data-truepresence="timing-only" autocomplete="nickname" />
+      </label>
+
+      <label>
+        Verification phrase
+        <input
+          data-truepresence="challenge"
+          data-truepresence-expected-reading-ms="1500"
+          autocomplete="off"
+        />
+      </label>
+
+      <label>
+        Password
+        <input type="password" autocomplete="new-password" />
+      </label>
+
+      <textarea data-truepresence-ignore="true"></textarea>
+
+      <button type="submit">Continue</button>
+    </form>
+
+    <pre id="truepresence-result" aria-live="polite"></pre>
+
+    <script type="module">
+      import { TruePresence } from "../../truepresence/sdk/index.js";
+
+      TruePresence.init({
+        siteKey: "tp_site_test",
+        endpoint: "/api/v1/truepresence/evaluate-interaction",
+        captureContent: false,
+        mode: "privacy_preserving",
+        onEvaluation(result) {
+          document.querySelector("#truepresence-result").textContent = JSON.stringify(
+            result,
+            null,
+            2,
+          );
+        },
+      });
+
+      TruePresence.protectForm("#signup-form", {
+        challenge: "typing_cadence",
+        expectedReadingTimeMs: 1500,
+      });
+    </script>
+  </body>
+</html>

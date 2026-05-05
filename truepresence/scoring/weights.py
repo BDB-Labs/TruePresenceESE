@@ -1,0 +1,9 @@
+SEVERITY_WEIGHTS = {
+    "low": 0.08,
+    "medium": 0.18,
+    "high": 0.30,
+}
+
+BASE_HUMAN_PRESENCE = 0.58
+BASE_AUTOMATION = 0.24
+BASE_AGENTIC_CONTROL = 0.18

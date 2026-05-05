@@ -1,12 +1,16 @@
-let lastMove = null;
+let movementCount = 0;
+let lastEmit = 0;
 
 export function initMouseTracker(sendEvent) {
   document.addEventListener("mousemove", (e) => {
     const now = performance.now();
-    const delta = lastMove
-      ? { dx: e.clientX - lastMove.x, dy: e.clientY - lastMove.y, dt: now - lastMove.t }
-      : null;
-    lastMove = { x: e.clientX, y: e.clientY, t: now };
-    sendEvent({ event_type: "cursor_move", payload: delta });
+    movementCount += 1;
+    if (movementCount % 20 === 0 || now - lastEmit > 1000) {
+      lastEmit = now;
+      sendEvent({
+        event_type: "pointer_summary",
+        payload: { pointer_movement_count: movementCount },
+      });
+    }
   });
 }

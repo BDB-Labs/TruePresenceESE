@@ -7,7 +7,10 @@ export function initKeyboardTracker(sendEvent) {
     lastKeyTime = now;
     sendEvent({
       event_type: "key_timing",
-      payload: { key: e.key, interval_ms: interval },
+      payload: {
+        interval_ms: interval,
+        is_correction_key: e.key === "Backspace" || e.key === "Delete",
+      },
     });
   });
 }

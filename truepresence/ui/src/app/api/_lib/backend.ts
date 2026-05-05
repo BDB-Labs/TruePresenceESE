@@ -7,11 +7,27 @@ interface ProxyOptions {
 }
 
 export function apiBaseUrl() {
-  return (
-    process.env.TRUEPRESENCE_API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "https://verify.bageltech.net"
-  ).replace(/\/$/, "");
+  const url = configuredApiBaseUrl();
+  if (!url) {
+    throw new Error(backendConfigurationMessage());
+  }
+  return url;
+}
+
+export function configuredApiBaseUrl() {
+  const url = process.env.TRUEPRESENCE_API_URL || process.env.NEXT_PUBLIC_API_URL;
+  return url?.replace(/\/$/, "") || null;
+}
+
+export function backendConfigurationMessage() {
+  return "TruePresence backend URL is not configured. Set TRUEPRESENCE_API_URL for server-side proxy routes.";
+}
+
+export function missingBackendConfigResponse() {
+  return NextResponse.json(
+    { detail: backendConfigurationMessage() },
+    { status: 503 },
+  );
 }
 
 export function withRequestSearch(path: string, request: Request) {
@@ -54,6 +70,11 @@ async function responseFromUpstream(upstream: Response) {
 }
 
 export async function proxyBackend(path: string, options: ProxyOptions = {}) {
+  const baseUrl = configuredApiBaseUrl();
+  if (!baseUrl) {
+    return missingBackendConfigResponse();
+  }
+
   const token = await authToken();
   if (!token) {
     return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
@@ -77,7 +98,7 @@ export async function proxyBackend(path: string, options: ProxyOptions = {}) {
   }
 
   try {
-    const upstream = await fetch(`${apiBaseUrl()}${path}`, {
+    const upstream = await fetch(`${baseUrl}${path}`, {
       method,
       headers,
       body,
