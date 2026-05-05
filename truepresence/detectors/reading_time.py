@@ -32,5 +32,6 @@ def implausible_read_response_time(
             confidence,
             "agentic_control",
             "Response latency was faster than the expected human read-and-respond window.",
+            category="agentic_behavior",
         )
     ]
