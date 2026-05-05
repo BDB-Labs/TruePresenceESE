@@ -19,6 +19,7 @@ def uniform_typing_cadence(features: TypingCadenceFeatures | None) -> list[Detec
                 0.9,
                 "automation",
                 "Inter-key interval variance is effectively zero.",
+                category="typing_cadence",
             )
         ]
 
@@ -30,6 +31,7 @@ def uniform_typing_cadence(features: TypingCadenceFeatures | None) -> list[Detec
                 0.76,
                 "automation",
                 "Typing cadence is unusually uniform for sustained human input.",
+                category="typing_cadence",
             )
         ]
 
@@ -41,6 +43,7 @@ def uniform_typing_cadence(features: TypingCadenceFeatures | None) -> list[Detec
                 0.66,
                 "automation",
                 "Fast input with very low cadence variation is automation-consistent.",
+                category="typing_cadence",
             )
         ]
 

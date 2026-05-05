@@ -9,6 +9,16 @@ from truepresence.sdk.features import TypingCadenceFeatures
 
 Severity = Literal["low", "medium", "high"]
 ContributionTarget = Literal["human_presence", "automation", "agentic_control"]
+SignalCategory = Literal[
+    "timing_plausibility",
+    "typing_cadence",
+    "input_method",
+    "pointer_behavior",
+    "session_continuity",
+    "environment",
+    "agentic_behavior",
+    "external_provider",
+]
 
 
 class DetectorSignal(BaseModel):
@@ -18,6 +28,7 @@ class DetectorSignal(BaseModel):
     severity: Severity
     confidence: float = Field(ge=0, le=1)
     contribution_target: ContributionTarget
+    category: SignalCategory
     explanation: str
 
 
@@ -27,12 +38,14 @@ def _signal(
     confidence: float,
     contribution_target: ContributionTarget,
     explanation: str,
+    category: SignalCategory = "timing_plausibility",
 ) -> DetectorSignal:
     return DetectorSignal(
         reason_code=reason_code,
         severity=severity,
         confidence=max(0.0, min(1.0, confidence)),
         contribution_target=contribution_target,
+        category=category,
         explanation=explanation,
     )
 
@@ -75,6 +88,7 @@ def paste_or_instant_input(features: TypingCadenceFeatures | None) -> list[Detec
             confidence,
             "automation",
             "Input timing suggests pasted, injected, or immediately populated content.",
+            category="input_method",
         )
     ]
 
@@ -101,6 +115,7 @@ def zero_correction_pattern(features: TypingCadenceFeatures | None) -> list[Dete
                 0.68,
                 "automation",
                 "No corrections combined with fast, low-variance input increases automation consistency.",
+                category="typing_cadence",
             )
         ]
 
@@ -111,6 +126,7 @@ def zero_correction_pattern(features: TypingCadenceFeatures | None) -> list[Dete
             0.35,
             "automation",
             "No corrections were observed; this is only weak evidence by itself.",
+            category="typing_cadence",
         )
     ]
 
