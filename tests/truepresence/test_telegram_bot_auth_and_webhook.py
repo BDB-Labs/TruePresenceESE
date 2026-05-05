@@ -33,6 +33,74 @@ def test_webhook_invalid_secret_returns_401(monkeypatch):
     assert response.status_code == 401
 
 
+def test_webhook_requires_secret_in_production(monkeypatch):
+    monkeypatch.setenv("TRUEPRESENCE_ENV", "production")
+    monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setattr(telegram_bot, "get_service_for_tenant", lambda tenant_id: _FakeService())
+
+    client = _build_client()
+    response = client.post(
+        "/telegram/webhook",
+        headers={"X-Tenant-ID": "default"},
+        json={"update_id": 123},
+    )
+
+    assert response.status_code == 503
+    assert "webhook secret is required" in response.json()["detail"].lower()
+
+
+def test_observe_mode_suppresses_punitive_action(monkeypatch):
+    service = telegram_bot.TelegramProtectionService.__new__(telegram_bot.TelegramProtectionService)
+    monkeypatch.delenv("TELEGRAM_ENFORCEMENT_MODE", raising=False)
+
+    action = {"action": "ban", "confidence": 0.95}
+    result = service._apply_enforcement_mode(action, "default")
+
+    assert result["action"] == "allow"
+    assert result["intended_action"] == "ban"
+    assert result["suppressed_action"] == "ban"
+    assert result["suppression_reason"] == "telegram_enforcement_mode_observe"
+    assert result["enforcement_mode"] == "observe"
+
+
+def test_challenge_only_mode_downgrades_ban_to_challenge(monkeypatch):
+    service = telegram_bot.TelegramProtectionService.__new__(telegram_bot.TelegramProtectionService)
+    monkeypatch.setenv("TELEGRAM_ENFORCEMENT_MODE", "challenge_only")
+
+    action = {"action": "ban", "confidence": 0.95}
+    result = service._apply_enforcement_mode(action, "default")
+
+    assert result["action"] == "challenge"
+    assert result["intended_action"] == "ban"
+    assert result["suppressed_action"] == "ban"
+    assert result["suppression_reason"] == "telegram_enforcement_mode_challenge_only"
+
+
+def test_review_required_mode_downgrades_ban_to_admin_review(monkeypatch):
+    service = telegram_bot.TelegramProtectionService.__new__(telegram_bot.TelegramProtectionService)
+    monkeypatch.setenv("TELEGRAM_ENFORCEMENT_MODE", "review_required")
+
+    action = {"action": "ban", "confidence": 0.95}
+    result = service._apply_enforcement_mode(action, "default")
+
+    assert result["action"] == "alert_admin"
+    assert result["intended_action"] == "ban"
+    assert result["suppressed_action"] == "ban"
+    assert result["suppression_reason"] == "telegram_enforcement_mode_review_required"
+
+
+def test_enforce_mode_preserves_punitive_action(monkeypatch):
+    service = telegram_bot.TelegramProtectionService.__new__(telegram_bot.TelegramProtectionService)
+    monkeypatch.setenv("TELEGRAM_ENFORCEMENT_MODE", "enforce")
+
+    action = {"action": "ban", "confidence": 0.95}
+    result = service._apply_enforcement_mode(action, "default")
+
+    assert result["action"] == "ban"
+    assert result["intended_action"] == "ban"
+    assert result["enforcement_mode"] == "enforce"
+
+
 def test_status_requires_admin_token(monkeypatch):
     monkeypatch.setenv("ADMIN_API_TOKEN", "admin-secret")
 

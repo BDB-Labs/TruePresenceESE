@@ -95,10 +95,58 @@ def _webhook_secret_for_tenant(tenant_id: str) -> str | None:
     return os.environ.get(f"TELEGRAM_WEBHOOK_SECRET_{tenant_id.upper()}") or os.environ.get("TELEGRAM_WEBHOOK_SECRET")
 
 
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_production_mode() -> bool:
+    env = (
+        os.environ.get("TRUEPRESENCE_ENV")
+        or os.environ.get("ENVIRONMENT")
+        or os.environ.get("APP_ENV")
+        or ""
+    ).strip().lower()
+    return env in {"prod", "production"} or _truthy_env("TRUEPRESENCE_PRODUCTION")
+
+
 def _verify_webhook_secret(request: Request, tenant_id: str) -> None:
     expected = _webhook_secret_for_tenant(tenant_id)
-    if expected and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != expected:
+
+    if not expected:
+        if _is_production_mode():
+            raise HTTPException(
+                status_code=503,
+                detail="Telegram webhook secret is required in production",
+            )
+        logger.warning(
+            "[%s] Telegram webhook secret is not configured; accepting unsigned webhook only outside production",
+            tenant_id,
+        )
+        return
+
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != expected:
         raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
+
+
+_ALLOWED_ENFORCEMENT_MODES = {"observe", "challenge_only", "review_required", "enforce"}
+
+
+def _enforcement_mode_for_tenant(tenant_id: str) -> str:
+    value = (
+        os.environ.get(f"TELEGRAM_ENFORCEMENT_MODE_{tenant_id.upper()}")
+        or os.environ.get("TELEGRAM_ENFORCEMENT_MODE")
+        or "observe"
+    ).strip().lower()
+
+    if value not in _ALLOWED_ENFORCEMENT_MODES:
+        logger.warning(
+            "[%s] Invalid TELEGRAM_ENFORCEMENT_MODE=%r; falling back to observe",
+            tenant_id,
+            value,
+        )
+        return "observe"
+
+    return value
 
 
 def require_telegram_admin(
@@ -184,12 +232,18 @@ class TelegramProtectionService:
                         try:
                             return decrypt_value(stored_token)
                         except Exception as exc:
-                            logger.warning(
-                                "[%s] Stored bot token decrypt failed; using stored value as plaintext fallback: %s",
-                                tenant_id,
-                                exc,
-                            )
-                            return stored_token
+                            allow_plaintext = _truthy_env("TRUEPRESENCE_ALLOW_PLAINTEXT_TELEGRAM_TOKENS")
+
+                            if allow_plaintext and not _is_production_mode():
+                                logger.warning(
+                                    "[%s] Stored bot token decrypt failed; using explicit non-production plaintext fallback: %s",
+                                    tenant_id,
+                                    exc,
+                                )
+                                return stored_token
+
+                            logger.error("[%s] Stored bot token decrypt failed; refusing unsafe token fallback", tenant_id)
+                            return None
         except Exception as exc:
             logger.warning("[%s] Token DB lookup unavailable; falling back to environment: %s", tenant_id, exc)
         return os.environ.get(f"TELEGRAM_BOT_TOKEN_{tenant_id.upper()}") or os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -327,19 +381,73 @@ class TelegramProtectionService:
         
         logger.info(f"Loaded configuration for tenant {tenant_id}: {config}")
         return config
+
+    def _apply_enforcement_mode(self, action: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+        mode = _enforcement_mode_for_tenant(tenant_id)
+        original_action = action.get("action")
+
+        action["enforcement_mode"] = mode
+        action["intended_action"] = original_action
+
+        if mode == "enforce":
+            return action
+
+        if original_action == "allow":
+            return action
+
+        if mode == "observe":
+            action["action"] = "allow"
+            action["suppressed_action"] = original_action
+            action["suppression_reason"] = "telegram_enforcement_mode_observe"
+            return action
+
+        if mode == "challenge_only" and original_action in {"ban", "kick", "block"}:
+            action["action"] = "challenge"
+            action["suppressed_action"] = original_action
+            action["suppression_reason"] = "telegram_enforcement_mode_challenge_only"
+            return action
+
+        if mode == "review_required" and original_action in {"ban", "kick", "block"}:
+            action["action"] = "alert_admin"
+            action["suppressed_action"] = original_action
+            action["suppression_reason"] = "telegram_enforcement_mode_review_required"
+            return action
+
+        return action
     
     async def _execute_action(self, action: Dict[str, Any], update: Dict[str, Any], tenant_id: str, decision_result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the determined Telegram action via Bot API and log the outcome to ESE.
         """
+        action_type = action.get("action")
+        execution_metadata = {
+            "intended_action": action.get("intended_action"),
+            "suppressed_action": action.get("suppressed_action"),
+            "suppression_reason": action.get("suppression_reason"),
+            "enforcement_mode": action.get("enforcement_mode"),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "evidence_packet_id": decision_result.get("evidence_packet", {}).get("packet_id"),
+            "decision_id": decision_result.get("decision_object", {}).get("decision_id"),
+        }
+
+        if action_type == "allow":
+            return {
+                "status": "not_required",
+                "action": "allow",
+                **execution_metadata,
+            }
+
+        if action_type not in {"ban", "kick", "warn", "challenge"}:
+            return {
+                "status": "skipped",
+                "action": action_type,
+                **execution_metadata,
+            }
+
         # Use the sync resolver wrapped in a thread to avoid loop blocking
         bot_token = await asyncio.to_thread(self._resolve_token_sync, tenant_id)
         if not bot_token:
             return {"status": "failed", "error": "Telegram bot token not configured"}
-
-        action_type = action.get("action")
-        if action_type == "allow":
-            return {"status": "executed", "action": "allow"}
 
         # Extract necessary IDs from update
         message = update.get("message") or update.get("edited_message", {})
@@ -375,8 +483,6 @@ class TelegramProtectionService:
                 "text": "🛡️ Verification Required: Please complete the challenge to continue posting.",
                 "reply_to_message_id": message_id
             }
-        else:
-            return {"status": "skipped", "action": action_type}
 
         try:
             response = await self._post_telegram_api(url, payload)
@@ -388,7 +494,12 @@ class TelegramProtectionService:
                 "response_text": response.text if not success else "OK",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "evidence_packet_id": decision_result.get("evidence_packet", {}).get("packet_id"),
-                "trace_id": decision_result.get("decision_trace_id")
+                "trace_id": decision_result.get("decision_trace_id"),
+                "decision_id": decision_result.get("decision_object", {}).get("decision_id"),
+                "intended_action": action.get("intended_action"),
+                "suppressed_action": action.get("suppressed_action"),
+                "suppression_reason": action.get("suppression_reason"),
+                "enforcement_mode": action.get("enforcement_mode"),
             }
             
             # Log outcome back to ESE Distributed Runtime
@@ -461,6 +572,7 @@ class TelegramProtectionService:
             # Convert to Telegram action
             action_obj = guard_adapter.enforce(decision_result.decision)
             action = action_obj.model_dump()
+            action = self._apply_enforcement_mode(action, tenant_id)
             
             logger.info(f"[{tenant_id}] Decision: {action['action']} (confidence: {action.get('confidence', 0):.2f})")
             
