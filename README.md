@@ -1,478 +1,239 @@
-# Ensemble Software Engineering (ESE)
+# TruePresence
 
-ESE is a lightweight CLI framework for orchestrated AI ensembles. The core engine stays generic, while installed config packs can contribute fixed role catalogs from external repositories.
+**TruePresence is a privacy-preserving interaction authenticity SDK.**
 
-## Product boundary
+It estimates, for any given web interaction, the likelihood that the actor is a human being, an automated script, or an AI agent in agentic control of a session. It does this without recording what a user types.
 
-TruePresence is the application product in this repository.
-ESE is the reusable ensemble orchestration substrate that TruePresence builds on.
+> **The SDK records how an interaction unfolds, not what a user types.**
 
-This repository currently contains both because TruePresence is being developed atop ESE.
-Product architecture, evidence contracts, decision logic, and enforcement flows belong to TruePresence.
-Generic orchestration, role execution infrastructure, model routing, and extension mechanics belong to ESE.
+TruePresence produces probabilistic signals — not verdicts. It returns a recommended action based on observed behavioral evidence, and it is designed to be transparent about the limits of that evidence.
 
-Production auth requires `JWT_SECRET` to be set. A development fallback is only allowed when explicit development mode is enabled together with `TRUEPRESENCE_ALLOW_DEV_AUTH`.
+---
 
-For product startup, backend, dashboard, Telegram webhook, and production environment setup, see [docs/TRUEPRESENCE_STARTUP.md](docs/TRUEPRESENCE_STARTUP.md).
+## How it works
 
-## Core pipeline
+TruePresence observes the *shape* of an interaction: timing intervals, typing rhythm, correction patterns, pointer behavior, and challenge response latency. It computes derived metrics locally in the browser, transmits only those derived features to the evaluation endpoint, and returns a scored response.
 
-```mermaid
-flowchart TD
-  A["Human Scope"] --> B["Architect"]
-  B --> C["Implementer"]
-  C --> D["Adversarial Reviewer"]
-  C --> E["Security Auditor"]
-  C --> F["Test Generator"]
-  C --> G["Performance Analyst"]
-  D --> H["Human Merge"]
-  E --> H
-  F --> H
-  G --> H
+The scoring model combines per-signal strength values across independent behavioral categories using a probabilistic aggregation formula. Signals from multiple independent categories increase risk estimates more than multiple signals from the same category. Contradictory evidence (strong human signals coexisting with automation signals) reduces the confidence value rather than being silently ignored.
+
+The response always includes:
+
+| Field | Description |
+|---|---|
+| `human_presence_likelihood` | Probability-scaled estimate that observed behavior is consistent with a human |
+| `automation_likelihood` | Estimate consistent with scripted or injected input |
+| `agentic_control_likelihood` | Estimate consistent with an AI agent controlling the session |
+| `confidence` | How much weight to place on the above estimates given available evidence |
+| `reason_codes` | Identifiers for the specific behavioral signals that fired |
+| `recommended_action` | One of: `allow`, `observe`, `soft_challenge`, `step_up_auth`, `manual_review` |
+| `evidence_packet_id` | Opaque identifier for this evaluation |
+
+TruePresence does not claim to prove that any actor is human, and it does not claim to detect all automated actors. It states that observed interaction features are more or less consistent with human operation, automation, or agentic control.
+
+---
+
+## Components
+
+### Browser SDK (`truepresence/sdk/index.js`)
+
+An ES module that attaches to web forms, collects privacy-safe derived interaction features, and posts them to the evaluation endpoint. Raw typed text, raw key values, passwords, payment data, and private content are never transmitted.
+
+### Backend evaluation endpoint (`POST /api/v1/truepresence/evaluate-interaction`)
+
+A FastAPI route that accepts an `InteractionFeaturePacket`, runs the behavioral detectors and probabilistic scoring model, and returns a `TruePresenceEvaluationResponse`.
+
+### Privacy guard (`truepresence/sdk/privacy.py`, `truepresence/sdk/privacy.js`)
+
+Server-side and client-side enforcement that rejects payloads containing raw content fields. If a payload contains `typed_text`, `key_values`, `password`, or similar fields, the guard raises before the payload reaches the scoring model.
+
+### Behavioral detectors (`truepresence/detectors/`)
+
+Deterministic Python functions that inspect derived feature values and emit `DetectorSignal` objects. Each signal carries a severity, a confidence value, a contribution target (`automation`, `agentic_control`, or `human_presence`), and a behavioral category. Current detectors:
+
+- `uniform_typing_cadence` — inter-key interval variance near zero
+- `paste_or_instant_input` — input appeared faster than manual typing allows
+- `zero_correction_pattern` — no corrections at high speed with low variance
+- `implausible_read_response_time` — response arrived faster than the human read window
+
+### Scoring model (`truepresence/scoring/model.py`)
+
+Combines detector signals using a calibrated probabilistic model: per-signal strength is computed from severity and confidence, signals within each behavioral category are aggregated via a product-of-complements formula to prevent overcounting, and categories are combined across independent evidence dimensions. Corroboration bonuses apply when multiple independent categories fire. Contradiction penalties apply when strong human evidence coexists with high risk.
+
+### Adapters
+
+TruePresence can be embedded in web surfaces, staging environments, and community platforms. Telegram is one optional adapter (`truepresence/adapters/telegram_bot.py`), not the product center.
+
+---
+
+## Quickstart
+
+### 1. Add the browser SDK to your form
+
+```html
+<script type="module">
+  import { TruePresence } from "/truepresence/sdk/index.js";
+
+  TruePresence.init({
+    siteKey: "tp_site_your_key",
+    endpoint: "/api/v1/truepresence/evaluate-interaction",
+    captureContent: false,
+    mode: "privacy_preserving",
+    onEvaluation(result) {
+      console.log(result.recommended_action, result.confidence);
+    },
+  });
+
+  TruePresence.protectForm("#your-form", {
+    challenge: "typing_cadence",
+    expectedReadingTimeMs: 1500,
+  });
+</script>
 ```
 
-## Installation
+### 2. Trigger evaluation on submit
 
-```bash
-pip install ese-cli
+```js
+document.querySelector("#your-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const result = await TruePresence.evaluate();
+  // result.recommended_action is one of:
+  //   allow | observe | soft_challenge | step_up_auth | manual_review
+});
 ```
 
-> **Note (Production):** `psycopg2-binary` is included for development convenience. For production deployments, use the system-installed `psycopg2` package instead to avoid binary compatibility issues:
-> ```bash
-> pip install psycopg2  # Requires system PostgreSQL libraries
-> ```
+### 3. Or call the endpoint directly
 
-Homebrew install from the dedicated tap:
+```http
+POST /api/v1/truepresence/evaluate-interaction
+Content-Type: application/json
 
-```bash
-brew tap Excelsior2026/ese https://github.com/Excelsior2026/homebrew-ese
-brew install ese-cli
+{
+  "session_id": "sess_abc123",
+  "tenant_id": "default",
+  "feature_packet": {
+    "surface": "web",
+    "typing": {
+      "mean_inter_key_interval_ms": 185,
+      "inter_key_interval_stddev_ms": 68,
+      "characters_per_minute": 210,
+      "correction_count": 3,
+      "correction_rate": 0.05,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 430
+    },
+    "challenge": {
+      "response_latency_ms": 3800,
+      "expected_reading_time_ms": 1500
+    },
+    "pointer": {
+      "pointer_entropy": 0.71,
+      "click_hesitation_ms": 195,
+      "scroll_cadence_score": 0.58
+    }
+  }
+}
 ```
 
-If you want local models via Ollama:
+Response:
 
-```bash
-brew install ollama
-brew services start ollama
+```json
+{
+  "human_presence_likelihood": 0.74,
+  "automation_likelihood": 0.12,
+  "agentic_control_likelihood": 0.09,
+  "confidence": 0.68,
+  "reason_codes": [],
+  "evidence_packet_id": "ep_3f9a...",
+  "recommended_action": "observe",
+  "enforcement_mode": "observe"
+}
 ```
 
-## One-Command Local Start
+---
 
-There is now a local GUI: the ESE dashboard.
+## Privacy
 
-From the repo root, the simplest way to start everything is:
+TruePresence is designed so that it never needs to see what a user typed in order to produce its signals.
+
+**Not collected by default:**
+
+- Raw typed text or keystroke values
+- Passwords or credential fields
+- Payment card data
+- Hidden field values
+- Private messages or free-form content
+- File input content
+
+**What is collected:**
+
+- Aggregate timing metrics (mean and variance of key intervals, not individual keys)
+- Typing speed estimate from content length deltas, not actual characters
+- Correction counts and rates
+- Paste event count (not paste content)
+- Focus and response timing
+- Pointer movement entropy and hesitation summaries
+
+Password inputs, hidden inputs, file inputs, payment-like fields, and any field marked `data-truepresence-ignore="true"` are excluded automatically.
+
+If a `beforeSend` callback or a direct API call injects raw content fields such as `typed_text`, `key_values`, or `password`, the privacy guard rejects the payload with a validation error before scoring begins.
+
+For the full privacy contract, see [docs/TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md](docs/TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md).
+
+---
+
+## Backend setup
+
+Start the backend:
 
 ```bash
 ./start_ese.sh
 ```
 
-That script will:
-- create `.venv` if needed,
-- install/update the package in the virtualenv,
-- start the local dashboard GUI.
-
-If you run a `local`/Ollama-backed workflow through the launcher, it now:
-- auto-starts Ollama when it is installed but not running,
-- prompts you to install Ollama or switch to a hosted provider when Ollama is missing.
-
-Other common launcher modes:
+Or directly:
 
 ```bash
-./start_ese.sh task "Prepare a staged rollout plan for billing"
-./start_ese.sh pr --base origin/main --head HEAD
-./start_ese.sh cli report --artifacts-dir artifacts
+uvicorn truepresence.main:app --reload
 ```
 
-## Production quickstart
+Production auth requires `JWT_SECRET`. A development fallback is available only when `TRUEPRESENCE_ALLOW_DEV_AUTH` is also set. See [docs/TRUEPRESENCE_STARTUP.md](docs/TRUEPRESENCE_STARTUP.md) for full startup, database, and deployment guidance.
 
-For the fastest path, you can now start from a task description instead of writing config first:
+---
 
-```bash
-ese task "Prepare a staged rollout plan for the new billing flow"
+## Documentation
+
+| Document | Description |
+|---|---|
+| [docs/TRUEPRESENCE_BROWSER_SDK.md](docs/TRUEPRESENCE_BROWSER_SDK.md) | Full browser SDK API reference, HTML attributes, and integration examples |
+| [docs/TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md](docs/TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md) | Privacy model, data collection boundaries, and output semantics contract |
+| [docs/TRUEPRESENCE_SDK_IMPLEMENTATION_BACKLOG.md](docs/TRUEPRESENCE_SDK_IMPLEMENTATION_BACKLOG.md) | Active implementation workstreams and acceptance criteria |
+| [docs/TRUEPRESENCE_CODEBASE_MAP.md](docs/TRUEPRESENCE_CODEBASE_MAP.md) | Canonical package paths, active modules, and API entry points |
+| [docs/TRUEPRESENCE_V1_ARCHITECTURE.md](docs/TRUEPRESENCE_V1_ARCHITECTURE.md) | Architecture overview and design rationale |
+| [docs/TRUEPRESENCE_DECISION_ENGINE.md](docs/TRUEPRESENCE_DECISION_ENGINE.md) | Decision engine and evidence synthesis internals |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+
+---
+
+## Repository structure
+
+```
+truepresence/
+  sdk/           # Browser SDK (JS) and Python SDK contracts, privacy guard
+  detectors/     # Behavioral detector functions
+  scoring/       # Probabilistic scoring model and category weights
+  api/           # FastAPI routes including evaluate-interaction
+  adapters/      # Surface adapters (Telegram and others)
+  decision/      # Decision engine and evidence synthesis
+  evidence/      # Evidence packet and argument graph
+ese/             # ESE ensemble orchestration substrate (separate concern)
+tests/truepresence/   # SDK, scoring, API, and privacy tests
+tests/browser-sdk/    # Browser SDK Node.js tests
+docs/            # Product and architecture documentation
 ```
 
-Use `ese templates` to inspect the built-in task templates.
+TruePresence is built on ESE (Ensemble Software Engineering), a generic AI orchestration substrate also present in this repository. ESE handles model routing, ensemble execution, and extension mechanics. TruePresence product logic — evidence contracts, behavioral detectors, scoring, enforcement flows — lives entirely under `truepresence/`.
 
-If you want an explicit saved config, use the original wizard path:
+---
 
-1. Generate a config:
+## License
 
-```bash
-ese init --advanced
-```
-
-The wizard now asks for:
-- a real project scope/task,
-- whether this should be a `demo` config (`dry-run`, no API calls) or a `live` config,
-- provider/model defaults appropriate for that choice,
-- custom framework roles with starter prompt suggestions and overlap warnings,
-- optionally, an installed external pack when one is available locally,
-- optional per-role model overrides in advanced mode.
-
-2. Validate configuration and ensemble constraints:
-
-```bash
-ese doctor --config ese.config.yaml
-```
-
-`ese start`, `ese task`, `ese pr`, and `ese rerun` now enforce the same doctor policy before execution.
-Violations fail consistently with exit code `2`, so task-first and PR-review flows cannot bypass ensemble policy checks.
-
-3. Execute the pipeline:
-
-```bash
-ese start --config ese.config.yaml
-```
-
-Pass `--artifacts-dir ...` only when you want to override `output.artifacts_dir` from the config.
-Use `--quiet` on `start`, `task`, `pr`, or `rerun` when you want machine-friendlier output with preflight/follow-up chatter suppressed.
-
-4. Review outputs:
-- `artifacts/ese_summary.md`
-- `artifacts/pipeline_state.json`
-- `artifacts/ese_config.snapshot.yaml`
-- per-role reports in `artifacts/*.json` when `output.enforce_json: true` (default)
-
-`ese run` remains available as a backward-compatible alias for `ese start`.
-
-For ad hoc runs, you can override the saved scope:
-
-```bash
-ese start --config ese.config.yaml --scope "Review the release checklist for hidden rollback risks"
-```
-
-## Task-First CLI
-
-Opinionated templates:
-
-```bash
-ese templates
-```
-
-Task-first execution without hand-authoring config:
-
-```bash
-ese task "Prepare a safer release workflow" --template release-readiness
-```
-
-Pull request review from a local diff or GitHub PR:
-
-```bash
-ese pr --repo-path . --base origin/main --head HEAD
-```
-
-Or, if you use GitHub CLI:
-
-```bash
-ese pr --repo-path . --pr 42
-```
-
-This writes the usual run artifacts plus `artifacts/pr_review.md`, a GitHub-ready review summary.
-
-Status and aggregated reporting for an artifacts directory:
-
-```bash
-ese status --artifacts-dir artifacts
-ese status --artifacts-dir artifacts --json
-ese report --artifacts-dir artifacts
-```
-
-Rerun from a specific role while reusing upstream artifacts:
-
-```bash
-ese rerun implementer --artifacts-dir artifacts
-```
-
-Reruns now write `start_role` and `parent_run_id` into `pipeline_state.json` so downstream tooling can follow lineage.
-
-Launch the local dashboard:
-
-```bash
-ese dashboard --artifacts-dir artifacts
-```
-
-The dashboard now supports both task-first runs and PR review runs.
-
-## Governance And Assurance
-
-Baseline ensemble independence is now enforced even when configs omit explicit constraints:
-- `architect` and `implementer` must not share a model.
-- `implementer` must not share a model with `adversarial_reviewer`, `security_auditor`, or `release_manager`.
-- `adversarial_reviewer` and `security_auditor` must not share a model.
-
-Solo mode still runs, but artifacts and reports are marked with `assurance_level: degraded`.
-Degraded assurance runs should not be treated as equivalent release evidence to full ensemble runs.
-
-Additional policy knobs are available under `constraints`, including:
-- `require_roles`
-- `minimum_distinct_models`
-- `minimum_specialist_roles`
-- `disallow_same_provider_pairs`
-- `require_json_for_roles`
-
-Set `strict_config: true` to reject unknown top-level keys and unknown per-role keys outside `provider`, `model`, `temperature`, and `prompt`.
-
-## Prompt Isolation And JSON Contracts
-
-`runtime.review_isolation` controls what specialists and fallback roles can see:
-- `framed`
-- `implementation_only`
-- `scope_only`
-- `scope_and_implementation` (default)
-
-When `output.enforce_json: true`, role reports must now include:
-- `summary`
-- `confidence`
-- `assumptions`
-- `unknowns`
-- `findings`
-- `artifacts`
-- `next_steps`
-- `code_suggestions`
-
-`evidence_basis` is optional and preserved when present.
-See `docs/ROLE_REPORT_CONTRACT.md` for the exact schema and semantics.
-
-## Artifact Metadata
-
-Each run now writes lineage and assurance metadata into `pipeline_state.json` and `ese_summary.md`, including:
-- `run_id`
-- `assurance_level`
-- `parent_run_id` for reruns
-- `start_role` for reruns
-- `state_contract_version`
-- `report_contract_version`
-
-## Framework role drafting
-
-Use `ese roles` to print the built-in starter role examples for framework installs.
-Use `ese packs` to list installed config packs discovered outside the ESE core package.
-Use `ese bundles` to list installed application bundles that group packs with supporting extensions.
-Use `ese doctor --environment` to validate the installed extension environment before a run.
-
-- `architect`: System design, decomposition, and interface contracts.
-- `implementer`: Code changes and refactors.
-- `adversarial_reviewer`: Bug/risk hunting and regression checks.
-- `security_auditor`: Threat modeling and vulnerability review.
-- `test_generator`: Unit/integration/e2e test generation.
-- `performance_analyst`: Latency, memory, and scalability analysis.
-- `documentation_writer`: README, API docs, and migration notes.
-- `devops_sre`: CI/CD, deploy safety, and observability.
-- `database_engineer`: Schema/index/migration correctness.
-- `release_manager`: Go/no-go risk assessment and rollout checks.
-
-Framework installs are not limited to those names. The wizard can now generate starter prompts for user-defined roles and warn when responsibilities overlap enough to weaken ensemble independence.
-
-## External Packs
-
-ESE no longer carries domain applications in the core repository. Vertical products should live in sibling repos and register packs through the `ese.config_packs` Python entry point group.
-
-Use `ese packs` to confirm what is installed in the current environment. When no packs are installed, the wizard stays in framework mode automatically.
-Use `ese task --pack ...` when you want to run directly against a pack without going through a full vertical bundle.
-
-Scaffold a new external pack project:
-
-```bash
-ese pack init ../my-product-pack --key my-product --preset strict
-```
-
-Validate the pack manifest and prompt assets:
-
-```bash
-ese pack validate ../my-product-pack
-ese pack test ../my-product-pack
-```
-
-This repository now carries a portable example external pack in [`examples/release_ops_pack`](examples/release_ops_pack).
-
-## External Policy Checks
-
-Installed policy checks can extend `ese doctor` and every preflighted run path (`ese start`, `ese task`, `ese pr`, `ese rerun`) through the `ese.policy_checks` Python entry point group.
-
-Use `ese policies` to list the installed checks in the current environment.
-
-This repository now carries a sample external policy plugin in [`examples/release_policy_plugin`](examples/release_policy_plugin).
-
-## External Reporting Plugins
-
-Installed reporting plugins can extend:
-
-- `ese export` through the `ese.report_exporters` Python entry point group
-- the dashboard artifact viewer and run documents through the `ese.artifact_views` Python entry point group
-
-Use `ese exporters` and `ese views` to list what is available in the current environment.
-
-This repository now carries a sample external reporting plugin in [`examples/release_reporting_plugin`](examples/release_reporting_plugin).
-
-## External Integrations
-
-Installed integrations can publish run evidence to external systems through the `ese.integrations` Python entry point group.
-
-Use:
-
-- `ese integrations` to list installed integrations
-- `ese publish --integration ...` to publish a run family
-- `ese extensions` to inspect the supported extension contract surfaces and versions
-
-This repository now carries a sample integration plugin in [`examples/release_integration_plugin`](examples/release_integration_plugin).
-
-## Application Bundles
-
-This repository now includes two installable reference application bundles that treat ESE as the substrate rather than the application:
-
-- [`starters/release_governance_starter`](starters/release_governance_starter): release-readiness, go-live review, and evidence publication
-- [`starters/architecture_review_starter`](starters/architecture_review_starter): architecture review, migration risk assessment, and decision briefing
-
-These are reference bundles, not long-term products that should stay inside ESE core.
-
-Recommended operating model:
-
-- keep ESE core generic
-- create a separate repository for each vertical product
-- copy or fork a reference application bundle into that repo
-- keep domain prompts, policies, exporters, views, and integrations there
-
-Installed bundle discovery:
-
-```bash
-ese bundles
-ese task "Review the staged rollout plan for billing cutover" --bundle release-governance
-```
-
-Application bundle lifecycle:
-
-```bash
-ese bundle validate ./starters/release_governance_starter
-ese bundle test ./starters/release_governance_starter
-```
-
-Legacy starter aliases remain available:
-
-```bash
-ese starter validate ./starters/release_governance_starter
-ese starter test ./starters/release_governance_starter
-ese pack validate ./starters/release_governance_starter
-ese pack test ./starters/release_governance_starter
-```
-
-## Portability CI
-
-Portability is now enforced in CI through [`.github/workflows/portability.yml`](.github/workflows/portability.yml).
-
-That workflow installs:
-
-- ESE core
-- the example pack, policy, reporting, and integration plugins
-- both reference application bundles
-
-It then proves:
-
-- extension discovery
-- environment doctor validation
-- application bundle validation and smoke testing
-- pack validation and smoke testing
-- task-first execution in demo mode
-- plugin-defined export formats
-- plugin-defined evidence publishing
-
-## Provider/model selection and adapters
-
-Wizard provider presets: `openai`, `anthropic`, `google`, `xai`, `openrouter`, `huggingface`, `local`, `custom_api`.
-If no hosted-provider credentials are detected, the wizard now defaults to `local`, and choosing `local` defaults the execution mode to `live`.
-
-Built-in runtime adapters:
-- `dry-run`: deterministic placeholder artifacts, no API calls.
-- `openai`: OpenAI Responses API adapter with retry/timeout handling.
-- `local`: Ollama-backed local adapter using the OpenAI-compatible endpoint.
-- `custom_api`: Responses-compatible custom provider adapter with validated base URL and auth env var.
-- `module:function`: custom Python callable adapter.
-
-When `output.enforce_json: true`, adapters must return valid JSON role reports and `gating.fail_on_high: true` will stop the pipeline on `HIGH` or `CRITICAL` findings.
-Adapter prompts now use the assembled prompt as the canonical input, with structured context kept separate for tooling/metadata.
-
-## Demo vs live setup
-
-- `demo`: writes a safe `dry-run` config using the selected provider/model defaults. This is the prudent path for first-time setup, local walkthroughs, and providers without native live adapters.
-- `live`: uses the built-in runtime for `openai`, `local` (Ollama), and `custom_api`.
-- Other providers remain available for model selection in the wizard, but live execution requires an explicit `module:function` adapter in advanced mode.
-
-### Local runtime example
-
-```yaml
-provider:
-  name: local
-  model: qwen2.5-coder:14b
-runtime:
-  adapter: local
-  timeout_seconds: 60
-  max_retries: 2
-  retry_backoff_seconds: 1.0
-  local:
-    base_url: http://localhost:11434/v1
-    use_openai_compat_auth: true
-```
-
-### OpenAI runtime example
-
-```yaml
-provider:
-  name: openai
-  model: gpt-5-mini
-  api_key_env: OPENAI_API_KEY
-runtime:
-  adapter: openai
-  timeout_seconds: 60
-  max_retries: 2
-  retry_backoff_seconds: 1.0
-  openai:
-    base_url: https://api.openai.com/v1
-```
-
-### Custom API runtime example
-
-```yaml
-provider:
-  name: my-gateway
-  model: my-model-id
-  api_key_env: CUSTOM_GATEWAY_TOKEN
-  base_url: https://gateway.example/v1
-runtime:
-  adapter: custom_api
-  timeout_seconds: 60
-  max_retries: 2
-  retry_backoff_seconds: 1.0
-  custom_api:
-    base_url: https://gateway.example/v1
-```
-
-## Evidence State
-
-Every collected report now carries an `evidence_state`:
-
-- derived automatically as `draft`, `ready`, or `blocked`
-- overridable to `approved` or `released` by an operator
-- propagated into exporters and integrations for release or approval workflows
-
-Inspect or update it with:
-
-```bash
-ese evidence --artifacts-dir artifacts
-ese evidence --artifacts-dir artifacts --set-state approved --actor "Release Manager"
-ese publish --integration filesystem-evidence --artifacts-dir artifacts --mark-state released
-```
-
-## Contract documentation
-
-- Config schema + version policy: [`docs/CONFIG_CONTRACT.md`](docs/CONFIG_CONTRACT.md)
-- Extension and pack boundary: [`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md)
-- Commercial packaging and positioning: [`docs/COMMERCIAL_PACKAGING.md`](docs/COMMERCIAL_PACKAGING.md)
-- Systems application delivery vertical report: [`docs/SYSTEMS_APPLICATION_DELIVERY_PLATFORM.md`](docs/SYSTEMS_APPLICATION_DELIVERY_PLATFORM.md)
-- Role report JSON contract: [`docs/ROLE_REPORT_CONTRACT.md`](docs/ROLE_REPORT_CONTRACT.md)
-- Pipeline state and lineage contract: [`docs/PIPELINE_STATE.md`](docs/PIPELINE_STATE.md)
-- Release evidence guidance: [`docs/RELEASE.md`](docs/RELEASE.md)
-- Pipeline state schema + deterministic role ordering: [`docs/PIPELINE_STATE.md`](docs/PIPELINE_STATE.md)
-- Troubleshooting: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
-- Contributor CI requirements: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Release checklist for 1.0.0: [`MILESTONE_1_0_0.md`](MILESTONE_1_0_0.md)
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
-- Release process: [`docs/RELEASE.md`](docs/RELEASE.md)
+See [LICENSE](LICENSE).
