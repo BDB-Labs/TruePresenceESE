@@ -131,7 +131,7 @@ class EvaluateResponse(BaseModel):
     decision: str  # allow|challenge|block|review
     risk_factors: List[str]
     reason_codes: List[str]
-    reasoning_trace: Dict[str, str]
+    reasoning_trace: Dict[str, Any]
     temporal_signals: TemporalSignals
     session_id: str
 

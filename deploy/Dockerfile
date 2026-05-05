@@ -22,10 +22,10 @@ ENV PORT=8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f "http://localhost:${PORT}/health" || exit 1
+    CMD curl -f "http://localhost:${PORT:-8000}/ready" || exit 1
 
 # Switch to non-root user
 USER appuser
 
-# Run server (exec form for proper signal handling)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${PORT:-8000}"]
+# Run server with runtime PORT expansion.
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

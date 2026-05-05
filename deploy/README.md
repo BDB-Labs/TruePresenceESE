@@ -1,130 +1,85 @@
 # TruePresence Cloud Deployment Guide
 
-## Quick Deploy Options
+This deploy path starts the product runtime from `main:app`, which imports
+`truepresence.main:app`. Use `/health` for liveness and `/ready` for deployment
+readiness.
 
-### Option 1: Railway (Easiest - 2 Minutes)
-
-1. **Push to GitHub**
-   ```bash
-   git add -A
-   git commit -m "Add cloud deployment configs"
-   git push origin main
-   ```
-
-2. **Deploy on Railway**
-   - Go to https://railway.app
-   - Connect your GitHub repo
-   - Click "Deploy Now"
-
-3. **Set Environment Variables**
-   - Add `TELEGRAM_BOT_TOKEN` in Railway dashboard
-
-4. **Get your URL**
-   - Railway provides: `https://truepresence-telegram.up.railway.app`
-
-5. **Set Telegram Webhook**
-   ```bash
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-railway-url/telegram/webhook"
-   ```
-
----
-
-### Option 2: Fly.io (Free - Good Performance)
-
-1. **Install Fly CLI**
-   ```bash
-   brew install flyctl
-   flyctl auth login
-   ```
-
-2. **Deploy**
-   ```bash
-   cd TruePresenceESE
-   flyctl deploy
-   ```
-
-3. **Set Secrets**
-   ```bash
-   flyctl secrets set TELEGRAM_BOT_TOKEN=your_token
-   ```
-
-4. **Set Webhook**
-   ```bash
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-app.fly.dev/telegram/webhook"
-   ```
-
----
-
-### Option 3: Render (Free Tier Available)
-
-1. **Push to GitHub**
-
-2. **Create on Render**
-   - Go to https://render.com
-   - New Web Service
-   - Connect GitHub repo
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`
-
-3. **Add Environment Variable**
-   - `TELEGRAM_BOT_TOKEN`
-
-4. **Set Webhook**
-   ```bash
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-render-url.onrender.com/telegram/webhook"
-   ```
-
----
-
-## Environment Variables Required
+## Required Production Environment
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | YES | Your bot token from @BotFather |
-| `PORT` | No | Defaults to 8000 |
-| `REDIS_URL` | No | For distributed sessions (optional) |
+| `JWT_SECRET` | Yes | Long random secret used to sign dashboard/API JWTs. |
+| `DATABASE_URL` | Yes | PostgreSQL connection string for users, Telegram tokens, sessions, and reviews. |
+| `TELEGRAM_BOT_TOKEN` | Yes | Default tenant bot token from BotFather. Per-tenant variants use `TELEGRAM_BOT_TOKEN_<TENANT>`. |
+| `TELEGRAM_WEBHOOK_SECRET` | Yes | Secret token Telegram must send in `X-Telegram-Bot-Api-Secret-Token`. |
+| `TRUEPRESENCE_ENCRYPTION_KEY` | Yes | Fernet key used when storing Telegram bot tokens through `/telegram/tokens`. |
+| `BASE_URL` | Yes | Public HTTPS origin used when configuring Telegram webhooks. |
+| `PORT` | No | Platform-provided port. Defaults to `8000`. |
+| `REDIS_URL` | No | Enables distributed session/cache storage. If set, `/ready` requires Redis to be reachable. |
 
----
+Do not set `TRUEPRESENCE_ALLOW_DEV_AUTH` or `TRUEPRESENCE_ALLOW_LENIENT_WIRING`
+in production.
 
-## Verify It's Working
+## Railway
 
-1. **Check health endpoint**
-   ```bash
-   curl https://your-url/health
-   ```
+1. Connect the GitHub repo to Railway.
+2. Add PostgreSQL and link `DATABASE_URL`.
+3. Set the required production variables above.
+4. Deploy with the existing Railway start command.
+5. Configure the Telegram webhook:
 
-2. **Check Telegram bot started**
-   - Send `/start` to your bot
-   - Should get response
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -d "url=$BASE_URL/telegram/webhook?tenant=default" \
+  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
 
-3. **Check webhook set**
-   ```bash
-   curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
-   ```
+## Fly.io / Docker
 
----
+The Docker image uses `/ready` as its container health check and expands the
+runtime `PORT` through a shell command.
 
-## Troubleshooting
+```bash
+flyctl secrets set \
+  JWT_SECRET=replace-with-long-random-secret \
+  DATABASE_URL=postgresql://... \
+  TELEGRAM_BOT_TOKEN=123456:telegram-token \
+  TELEGRAM_WEBHOOK_SECRET=replace-with-webhook-secret \
+  TRUEPRESENCE_ENCRYPTION_KEY=replace-with-fernet-key \
+  BASE_URL=https://your-app.fly.dev
 
-### Bot not responding?
-- Check logs: `flyctl logs` or Railway dashboard logs
-- Verify webhook: `curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"`
+flyctl deploy
+```
 
-### Bot crashes immediately?
-- Check environment variables are set
-- Run locally first: `python -m truepresence.adapters.telegram_bot`
+## Render
 
-### Getting 502 errors?
-- Health check might be failing
-- Check that the server is binding to the platform-provided `PORT`
+Use the Python service path, not the dashboard Node build, for the backend:
 
----
+- Build command: `pip install -r requirements.txt`
+- Start command: `uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`
+- Health check path: `/ready`
+
+Set the required production variables before enabling deploys.
+
+## Verification
+
+```bash
+curl "$BASE_URL/health"
+curl -f "$BASE_URL/ready"
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+`/health` returns component status for diagnostics. `/ready` returns HTTP 503
+when PostgreSQL is unavailable, or when Redis is configured but unavailable.
 
 ## Production Checklist
 
-- [ ] Telegram bot token set
-- [ ] Webhook URL set in Telegram
-- [ ] Health endpoint responding
-- [ ] Bot responds to /start command
-- [ ] Logs show no errors
-- [ ] Domain configured (optional for custom domain)
+- [ ] `JWT_SECRET` is set and not shared with development.
+- [ ] `DATABASE_URL` points at migrated PostgreSQL.
+- [ ] Initial admin user has been seeded.
+- [ ] `TELEGRAM_BOT_TOKEN` or tenant-specific bot tokens are set.
+- [ ] `TELEGRAM_WEBHOOK_SECRET` is set and passed to Telegram.
+- [ ] `TRUEPRESENCE_ENCRYPTION_KEY` is set before storing bot tokens.
+- [ ] `/health` returns diagnostics.
+- [ ] `/ready` returns HTTP 200.
+- [ ] Telegram `getWebhookInfo` shows the expected webhook URL and no delivery errors.

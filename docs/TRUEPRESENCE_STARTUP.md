@@ -37,6 +37,7 @@ Verify:
 
 ```bash
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/ready
 curl http://127.0.0.1:8000/api/health
 ```
 
@@ -127,6 +128,7 @@ JWT_SECRET=long-random-production-secret
 DATABASE_URL=postgresql://...
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_WEBHOOK_SECRET=...
+TRUEPRESENCE_ENCRYPTION_KEY=fernet-key-for-stored-telegram-tokens
 BASE_URL=https://your-public-domain.example
 PORT=8000
 ```
@@ -138,7 +140,8 @@ REDIS_URL=redis://...
 TRUEPRESENCE_IDENTITY_HASH_SECRET=long-random-secret
 ```
 
-Do not set `TRUEPRESENCE_ALLOW_DEV_AUTH` in production.
+Do not set `TRUEPRESENCE_ALLOW_DEV_AUTH` or
+`TRUEPRESENCE_ALLOW_LENIENT_WIRING` in production.
 
 ## Verification
 
@@ -167,6 +170,8 @@ TypeScript, JSON, and TSX assets that Ruff will report as invalid Python.
   both `TRUEPRESENCE_ENV=development` and `TRUEPRESENCE_ALLOW_DEV_AUTH=true`.
 - Login fails while health checks pass: configure `DATABASE_URL` and run
   `python seed_admin.py`.
+- `/ready` returns HTTP 503: configure PostgreSQL, and if `REDIS_URL` is set,
+  make sure Redis is reachable.
 - Telegram webhook returns unauthorized: if `TELEGRAM_WEBHOOK_SECRET` is set,
   Telegram must send the matching `X-Telegram-Bot-Api-Secret-Token` header.
 - Redis connection errors: unset `REDIS_URL` for a local single-process run, or

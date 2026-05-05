@@ -38,6 +38,40 @@ def _get_allowed_origins() -> list[str]:
     return ALLOWED_ORIGINS
 
 
+def _component_status() -> dict[str, Any]:
+    status: dict[str, Any] = {"status": "ok", "components": {}}
+
+    try:
+        from truepresence.db import get_db
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        status["components"]["database"] = "ok"
+    except Exception:
+        status["components"]["database"] = "error"
+        status["status"] = "degraded"
+
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        status["components"]["redis"] = "unconfigured"
+        return status
+
+    try:
+        from truepresence.runtime.distributed import DistributedRuntime
+        dist = DistributedRuntime(redis_url=redis_url)
+        if dist.available and dist.redis_client:
+            dist.redis_client.ping()
+            status["components"]["redis"] = "ok"
+        else:
+            status["components"]["redis"] = "unavailable"
+            status["status"] = "degraded"
+    except Exception:
+        status["components"]["redis"] = "error"
+        status["status"] = "degraded"
+
+    return status
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, Any]]:
@@ -119,32 +153,15 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, Any]:
-        """Enhanced health check with component status."""
-        status = {"status": "ok", "components": {}}
+        """Liveness endpoint with component status."""
+        return _component_status()
 
-        # Check database
-        try:
-            from truepresence.db import get_db
-            with get_db() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-            status["components"]["database"] = "ok"
-        except Exception:
-            status["components"]["database"] = "error"
-            status["status"] = "degraded"
-
-        # Check Redis (if configured)
-        try:
-            from truepresence.runtime.distributed import DistributedRuntime
-            dist = DistributedRuntime()
-            if dist.available:
-                dist.redis_client.ping()
-                status["components"]["redis"] = "ok"
-            else:
-                status["components"]["redis"] = "unavailable"
-        except Exception:
-            status["components"]["redis"] = "error"
-
+    @app.get("/ready", response_model=None)
+    def ready() -> Any:
+        """Readiness endpoint for deployment health checks."""
+        status = _component_status()
+        if status["status"] != "ok":
+            return JSONResponse(status_code=503, content=status)
         return status
 
     return app

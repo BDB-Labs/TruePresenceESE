@@ -36,6 +36,7 @@ class DistributedRuntime:
             ttl_seconds: Time-to-live for session data in seconds (default: 1 hour)
         """
         self.ttl_seconds = ttl_seconds
+        self._memory_store = {}
 
         if REDIS_AVAILABLE:
             try:
@@ -58,7 +59,6 @@ class DistributedRuntime:
             logger.warning("Redis package not available. Using in-memory fallback.")
             self.redis_client = None
             self.available = False
-            self._memory_store = {}
 
     def _get_session_key(self, session_id: str) -> str:
         """Generate Redis key for session."""
