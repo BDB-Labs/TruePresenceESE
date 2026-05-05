@@ -22,10 +22,21 @@ in production.
 
 ## Railway
 
+Railway hosts the Python backend from the repository root.
+
+Service settings are captured in `railway.toml`:
+
+- Builder: Dockerfile
+- Dockerfile path: `deploy/Dockerfile`
+- Start command: `/bin/sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"`
+- Health check path: `/ready`
+
+Setup:
+
 1. Connect the GitHub repo to Railway.
 2. Add PostgreSQL and link `DATABASE_URL`.
 3. Set the required production variables above.
-4. Deploy with the existing Railway start command.
+4. Deploy with the checked-in Railway config.
 5. Configure the Telegram webhook:
 
 ```bash
@@ -33,6 +44,21 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d "url=$BASE_URL/telegram/webhook?tenant=default" \
   -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
 ```
+
+## Vercel
+
+Vercel hosts the Next.js dashboard in `truepresence/ui`.
+
+Service settings:
+
+- Root directory: `truepresence/ui`
+- Framework preset: Next.js
+- Install command: `npm install`
+- Build command: `npm run build`
+- Output directory: `.next`
+
+Set `TRUEPRESENCE_API_URL` in Vercel to the public Railway backend origin. The
+dashboard's Next.js API routes proxy authenticated requests to that backend.
 
 ## Fly.io / Docker
 
@@ -50,16 +76,6 @@ flyctl secrets set \
 
 flyctl deploy
 ```
-
-## Render
-
-Use the Python service path, not the dashboard Node build, for the backend:
-
-- Build command: `pip install -r requirements.txt`
-- Start command: `uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`
-- Health check path: `/ready`
-
-Set the required production variables before enabling deploys.
 
 ## Verification
 

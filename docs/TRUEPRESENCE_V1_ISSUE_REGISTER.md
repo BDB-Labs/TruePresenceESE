@@ -23,13 +23,13 @@ database-backed, WebSocket, browser, and load tests can add new entries.
 | V1-P0-003 | P0 | Deployment | Docker exec-form command passed literal `${PORT:-8000}` to Uvicorn. | `deploy/Dockerfile` | Switched to shell command with runtime port expansion. |
 | V1-P0-004 | P0 | Readiness | Deployment health could pass while required dependencies were broken. | `truepresence/main.py`, `deploy/Dockerfile` | Added `/ready` and pointed container health checks at it. |
 | V1-P0-005 | P0 | Docs/Ops | Deployment docs omitted required production env vars. | `deploy/README.md`, `docs/TRUEPRESENCE_STARTUP.md` | Updated production env and verification guidance. |
+| V1-P0-007 | P0 | CI/deploy | Render deploy workflows ran Node commands at repo root for a Python backend even though production deploys use Railway for the backend and Vercel for the dashboard. | `.github/workflows/render-deploy.yml`, `.github/workflows/render-depoly.yml`, `railway.toml`, `truepresence/ui/vercel.json` | Removed both Render workflows and aligned deploy docs/tests around Railway backend and Vercel dashboard deploys. |
 
 ## Open Production Blockers
 
 | ID | Severity | Area | Issue | Evidence | Remediation |
 |----|----------|------|-------|----------|-------------|
 | V1-P0-006 | P0 | Product scope | TruePresence V1 expectations are not yet frozen against a product narrative. ESE 1.0 readiness and TruePresence product readiness are currently easy to confuse. | `MILESTONE_1_0_0.md`, `docs/TRUEPRESENCE_V1_ARCHITECTURE.md` | Write and approve a V1 launch narrative/checklist for surfaces, tenants, enforcement, audit, and SLOs. |
-| V1-P0-007 | P0 | CI/deploy | Render deploy workflows run Node commands at repo root for a Python backend and are duplicated with a misspelled file. | `.github/workflows/render-deploy.yml`, `.github/workflows/render-depoly.yml` | Replace with a Python backend deploy workflow or disable until configured. |
 
 ## Open High-Severity Issues
 
