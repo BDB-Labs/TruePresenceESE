@@ -3,9 +3,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from truepresence.core.runtime import (
     decision_engine as shared_decision_engine,
@@ -15,6 +15,12 @@ from truepresence.core.runtime import (
 )
 from truepresence.core.session import Session
 from truepresence.exceptions import TruePresenceError
+from truepresence.sdk.contracts import (
+    TruePresenceEvaluationRequest,
+    TruePresenceEvaluationResponse,
+)
+from truepresence.sdk.evaluation import evaluate_interaction_request
+from truepresence.sdk.privacy import RawContentRejected, ensure_privacy_safe_payload
 
 # Configure logging - CRITICAL systems must log
 logging.basicConfig(
@@ -259,6 +265,28 @@ def evaluate(request: EvaluateRequest):
         ),
         session_id=request.session_id
     )
+
+
+@app.post(
+    "/v1/truepresence/evaluate-interaction",
+    response_model=TruePresenceEvaluationResponse,
+)
+async def evaluate_interaction(request: Request):
+    """Evaluate privacy-preserving web interaction features without Telegram."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON") from exc
+
+    try:
+        ensure_privacy_safe_payload(payload)
+        evaluation_request = TruePresenceEvaluationRequest.model_validate(payload)
+    except RawContentRejected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    return evaluate_interaction_request(evaluation_request)
 
 
 @app.get("/health")

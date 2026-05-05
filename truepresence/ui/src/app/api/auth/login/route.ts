@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { apiBaseUrl } from "../../_lib/backend";
+import {
+  configuredApiBaseUrl,
+  missingBackendConfigResponse,
+} from "../../_lib/backend";
 
 interface LoginPayload {
   access_token?: string;
@@ -10,13 +13,26 @@ interface LoginPayload {
 }
 
 export async function POST(request: Request) {
+  const baseUrl = configuredApiBaseUrl();
+  if (!baseUrl) {
+    return missingBackendConfigResponse();
+  }
+
   const credentials = await request.json();
-  const upstream = await fetch(`${apiBaseUrl()}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(credentials),
-    cache: "no-store",
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${baseUrl}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(credentials),
+      cache: "no-store",
+    });
+  } catch {
+    return NextResponse.json(
+      { detail: "TruePresence backend is unavailable" },
+      { status: 502 },
+    );
+  }
   const payload = (await upstream.json()) as LoginPayload;
 
   if (!upstream.ok || !payload.access_token) {
