@@ -358,3 +358,153 @@ test("beforeSend cannot inject raw content into the payload", async () => {
   assert.equal(body.includes("typed_text"), false);
   assert.equal(body.includes("SHOULD NOT LEAVE SDK"), false);
 });
+
+// ---------------------------------------------------------------------------
+// Hardening: renamed raw-content fields stripped by browser SDK
+// ---------------------------------------------------------------------------
+
+test("beforeSend cannot inject renamed raw-content field 'answer' into payload", async () => {
+  const harness = createHarness();
+  const sdk = initHarness(harness, {
+    beforeSend: (payload) => ({
+      ...payload,
+      feature_packet: {
+        ...payload.feature_packet,
+        typing: {
+          ...payload.feature_packet.typing,
+          answer: "injected answer text",
+        },
+      },
+    }),
+  });
+
+  await sdk.evaluate();
+
+  const body = JSON.stringify(harness.calls[0].payload);
+  assert.equal(body.includes("answer"), false, "answer field must be stripped");
+  assert.equal(body.includes("injected answer text"), false);
+});
+
+test("beforeSend cannot inject renamed raw-content field 'response' into payload", async () => {
+  const harness = createHarness();
+  const sdk = initHarness(harness, {
+    beforeSend: (payload) => ({
+      ...payload,
+      feature_packet: {
+        ...payload.feature_packet,
+        typing: {
+          ...payload.feature_packet.typing,
+          response: "injected response text",
+        },
+      },
+    }),
+  });
+
+  await sdk.evaluate();
+
+  const body = JSON.stringify(harness.calls[0].payload);
+  assert.equal(body.includes('"response"'), false, "response field must be stripped");
+  assert.equal(body.includes("injected response text"), false);
+});
+
+test("beforeSend cannot inject renamed raw-content field 'comment' into payload", async () => {
+  const harness = createHarness();
+  const sdk = initHarness(harness, {
+    beforeSend: (payload) => ({
+      ...payload,
+      feature_packet: {
+        ...payload.feature_packet,
+        comment: "injected comment",
+      },
+    }),
+  });
+
+  await sdk.evaluate();
+
+  const body = JSON.stringify(harness.calls[0].payload);
+  assert.equal(body.includes("comment"), false, "comment field must be stripped");
+  assert.equal(body.includes("injected comment"), false);
+});
+
+test("beforeSend cannot inject renamed raw-content field 'description' into payload", async () => {
+  const harness = createHarness();
+  const sdk = initHarness(harness, {
+    beforeSend: (payload) => ({
+      ...payload,
+      feature_packet: {
+        ...payload.feature_packet,
+        metadata: {
+          ...payload.feature_packet.metadata,
+          description: "raw description text",
+        },
+      },
+    }),
+  });
+
+  await sdk.evaluate();
+
+  const body = JSON.stringify(harness.calls[0].payload);
+  assert.equal(body.includes("description"), false, "description field must be stripped");
+  assert.equal(body.includes("raw description text"), false);
+});
+
+test("beforeSend cannot inject renamed raw-content field 'message' into payload", async () => {
+  const harness = createHarness();
+  const sdk = initHarness(harness, {
+    beforeSend: (payload) => ({
+      ...payload,
+      message: "raw user message",
+    }),
+  });
+
+  await sdk.evaluate();
+
+  const body = JSON.stringify(harness.calls[0].payload);
+  assert.equal(body.includes('"message"'), false, "message field must be stripped");
+  assert.equal(body.includes("raw user message"), false);
+});
+
+test("beforeSend cannot inject renamed raw-content field 'content' into payload", async () => {
+  const harness = createHarness();
+  const sdk = initHarness(harness, {
+    beforeSend: (payload) => ({
+      ...payload,
+      feature_packet: {
+        ...payload.feature_packet,
+        content: "raw content here",
+      },
+    }),
+  });
+
+  await sdk.evaluate();
+
+  const body = JSON.stringify(harness.calls[0].payload);
+  assert.equal(body.includes('"content"'), false, "content field must be stripped");
+  assert.equal(body.includes("raw content here"), false);
+});
+
+test("section allowlist strips unknown typing fields injected via beforeSend", async () => {
+  const harness = createHarness();
+  const sdk = initHarness(harness, {
+    beforeSend: (payload) => ({
+      ...payload,
+      feature_packet: {
+        ...payload.feature_packet,
+        typing: {
+          ...payload.feature_packet.typing,
+          raw_event_sequence: [100, 200, 300],
+          mean_inter_key_interval_ms: payload.feature_packet.typing?.mean_inter_key_interval_ms,
+        },
+      },
+    }),
+  });
+
+  await sdk.evaluate();
+
+  const body = JSON.stringify(harness.calls[0].payload);
+  assert.equal(
+    body.includes("raw_event_sequence"),
+    false,
+    "unknown typing field must be stripped by section allowlist",
+  );
+});

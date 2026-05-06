@@ -12,7 +12,10 @@ from truepresence.sdk.features import (
     SessionContinuityFeatures,
     TypingCadenceFeatures,
 )
-from truepresence.sdk.privacy import ensure_privacy_safe_payload
+from truepresence.sdk.privacy import (
+    ensure_privacy_safe_feature_packet,
+    ensure_privacy_safe_payload,
+)
 
 RecommendedAction = Literal["allow", "observe", "soft_challenge", "step_up_auth", "manual_review"]
 EnforcementMode = Literal["observe", "challenge_only", "review_required", "enforce"]
@@ -25,20 +28,19 @@ class InteractionFeaturePacket(BaseModel):
     site_id: str | None = None
     tenant_id: str | None = None
     session_id: str | None = None
-    flow_id: str | None = None
     page_context: dict[str, Any] = Field(default_factory=dict)
     typing: TypingCadenceFeatures | None = None
     pointer: PointerBehaviorFeatures | None = None
     challenge: ChallengeInteractionFeatures | None = None
     session_continuity: SessionContinuityFeatures | None = None
     environment: EnvironmentFeatures | None = None
-    external_risk: list[ExternalRiskProviderFeatures] = Field(default_factory=list)
+    external_risk_provider: list[ExternalRiskProviderFeatures] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
     def reject_raw_content(cls, data: Any) -> Any:
-        ensure_privacy_safe_payload(data)
+        ensure_privacy_safe_feature_packet(data)
         return data
 
 
@@ -49,7 +51,6 @@ class TruePresenceEvaluationRequest(BaseModel):
     tenant_id: str = "default"
     enforcement_mode: EnforcementMode = "observe"
     feature_packet: InteractionFeaturePacket
-    request_id: str | None = None
 
     @model_validator(mode="before")
     @classmethod

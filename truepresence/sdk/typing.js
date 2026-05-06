@@ -127,8 +127,11 @@ export function createTypingCadenceCollector({ now }) {
       totalInsertedLength: 0,
     };
     const challenge = {
+      correctionCount: 0,
       firstInputAt: null,
       inputCount: 0,
+      lastInputAt: null,
+      pasteCount: 0,
       promptRenderAt: null,
       expectedReadingTimeMs: undefined,
       challengeType: "typing_cadence",
@@ -162,7 +165,9 @@ export function createTypingCadenceCollector({ now }) {
       }
 
       if (state.isChallenge) {
+        challenge.correctionCount += state.correctionCount;
         challenge.inputCount += state.inputEventCount;
+        challenge.pasteCount += state.pasteCount;
         challenge.expectedReadingTimeMs =
           challenge.expectedReadingTimeMs ?? state.expectedReadingTimeMs;
         challenge.challengeType = state.challengeType || challenge.challengeType;
@@ -174,6 +179,12 @@ export function createTypingCadenceCollector({ now }) {
           (challenge.firstInputAt === null || state.firstInputAt < challenge.firstInputAt)
         ) {
           challenge.firstInputAt = state.firstInputAt;
+        }
+        if (
+          state.lastInputAt !== null &&
+          (challenge.lastInputAt === null || state.lastInputAt > challenge.lastInputAt)
+        ) {
+          challenge.lastInputAt = state.lastInputAt;
         }
       }
     }
@@ -209,6 +220,8 @@ export function createTypingCadenceCollector({ now }) {
           ? aggregate.firstInputAt - aggregate.promptRenderAt
           : undefined,
       typing_duration_ms: numeric(durationMs),
+      last_input_to_submit_ms:
+        submitAt !== null && aggregate.lastInputAt !== null ? submitAt - aggregate.lastInputAt : undefined,
     };
 
     const typingSummary = {
@@ -225,15 +238,19 @@ export function createTypingCadenceCollector({ now }) {
       challenge.inputCount > 0
         ? {
             challenge_type: challenge.challengeType,
+            correction_count: challenge.correctionCount,
             expected_reading_time_ms: numeric(challenge.expectedReadingTimeMs),
+            paste_count: challenge.pasteCount,
             prompt_render_to_first_input_ms:
               challenge.promptRenderAt !== null && challenge.firstInputAt !== null
                 ? challenge.firstInputAt - challenge.promptRenderAt
                 : undefined,
             response_latency_ms:
               challenge.promptRenderAt !== null ? currentNow - challenge.promptRenderAt : undefined,
-            challenge_duration_ms:
-              challenge.promptRenderAt !== null ? currentNow - challenge.promptRenderAt : undefined,
+            typing_duration_ms:
+              challenge.firstInputAt !== null && challenge.lastInputAt !== null
+                ? challenge.lastInputAt - challenge.firstInputAt
+                : undefined,
           }
         : null;
 

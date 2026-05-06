@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,25 +19,26 @@ class TypingCadenceFeatures(PrivacySafeFeatureModel):
     focus_to_first_input_ms: float | None = Field(default=None, ge=0)
     prompt_render_to_first_input_ms: float | None = Field(default=None, ge=0)
     typing_duration_ms: float | None = Field(default=None, ge=0)
-    burst_count: int | None = Field(default=None, ge=0)
-    pause_count: int | None = Field(default=None, ge=0)
+    last_input_to_submit_ms: float | None = Field(default=None, ge=0)
 
 
 class PointerBehaviorFeatures(PrivacySafeFeatureModel):
     pointer_entropy: float | None = Field(default=None, ge=0)
     click_hesitation_ms: float | None = Field(default=None, ge=0)
     scroll_cadence_score: float | None = Field(default=None, ge=0, le=1)
-    pointer_path_curvature_score: float | None = Field(default=None, ge=0, le=1)
     pointer_movement_count: int | None = Field(default=None, ge=0)
     click_count: int | None = Field(default=None, ge=0)
 
 
 class ChallengeInteractionFeatures(PrivacySafeFeatureModel):
+    challenge_type: str | None = None
     response_latency_ms: float | None = Field(default=None, ge=0)
     expected_reading_time_ms: float | None = Field(default=None, ge=0)
     prompt_render_to_first_input_ms: float | None = Field(default=None, ge=0)
-    challenge_duration_ms: float | None = Field(default=None, ge=0)
-    challenge_type: str | None = None
+    correction_count: int | None = Field(default=None, ge=0)
+    paste_count: int | None = Field(default=None, ge=0)
+    typing_duration_ms: float | None = Field(default=None, ge=0)
+    submitted_exactly: bool | None = None
 
 
 class SessionContinuityFeatures(PrivacySafeFeatureModel):
@@ -65,4 +64,3 @@ class ExternalRiskProviderFeatures(PrivacySafeFeatureModel):
     risk_score: float = Field(ge=0, le=1)
     confidence: float | None = Field(default=None, ge=0, le=1)
     reason_codes: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)

@@ -19,7 +19,6 @@ The SDK may collect derived timing, rhythm, and interaction metrics such as:
 - typing duration for a protected challenge or field;
 - mean inter-key interval;
 - inter-key interval variance / standard deviation;
-- burst count and pause distribution;
 - characters-per-minute estimate;
 - correction count and correction rate;
 - paste event count;
@@ -27,7 +26,6 @@ The SDK may collect derived timing, rhythm, and interaction metrics such as:
 - time from prompt render to first interaction;
 - time from final interaction to submit;
 - pointer movement entropy;
-- pointer path curvature summary;
 - click hesitation timing;
 - scroll cadence summaries;
 - focus / blur sequence metadata;
@@ -35,6 +33,36 @@ The SDK may collect derived timing, rhythm, and interaction metrics such as:
 - whether response timing was physically plausible for a human to read and respond.
 
 These features should be computed locally where practical and transmitted as aggregate metrics.
+
+## Schema Allowlist Enforcement
+
+SDK evaluation payloads are closed-schema by default. The backend accepts only approved request fields and aggregate feature sections, then applies section-level allowlists before scoring.
+
+Allowed top-level request fields:
+
+- `session_id`;
+- `tenant_id`;
+- `enforcement_mode`;
+- `feature_packet`.
+
+Allowed `feature_packet` sections:
+
+- `surface`;
+- `site_id`;
+- `session_id`;
+- `tenant_id`;
+- `page_context`;
+- `metadata`;
+- `typing`;
+- `challenge`;
+- `pointer`;
+- `environment`;
+- `session_continuity`;
+- `external_risk_provider`.
+
+Allowed behavioral feature fields are aggregate-only. Examples include `mean_inter_key_interval_ms`, `inter_key_interval_stddev_ms`, `characters_per_minute`, `correction_count`, `correction_rate`, `paste_count`, `focus_to_first_input_ms`, `prompt_render_to_first_input_ms`, `typing_duration_ms`, `last_input_to_submit_ms`, `response_latency_ms`, `expected_reading_time_ms`, `pointer_entropy`, `pointer_movement_count`, `click_count`, `click_hesitation_ms`, and `scroll_cadence_score`.
+
+Direct API calls to `/api/v1/truepresence/evaluate-interaction` are subject to the same privacy rules as browser SDK submissions. Arbitrary free-form fields are rejected by default, including renamed raw-content fields such as `answer`, `response`, `comment`, `description`, `body`, `message`, `prompt`, `transcript`, `content`, `user_input`, `input_value`, `field_value`, `raw_value`, and `raw_input`.
 
 ## What The SDK Must Not Collect By Default
 

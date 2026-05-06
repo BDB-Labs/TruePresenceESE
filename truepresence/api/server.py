@@ -56,6 +56,17 @@ def _get_session_field(distributed, session_id: str, field: str):
     return None
 
 
+def _safe_validation_errors(exc: ValidationError) -> list[dict[str, Any]]:
+    """Return validation error details without echoing submitted values."""
+    return [
+        {
+            "loc": error.get("loc", ()),
+            "msg": error.get("msg", "Invalid request payload"),
+            "type": error.get("type", "validation_error"),
+        }
+        for error in exc.errors()
+    ]
+
 
 # Exception handlers - CRITICAL: System does NOT fail silently
 @app.exception_handler(TruePresenceError)
@@ -284,7 +295,7 @@ async def evaluate_interaction(request: Request):
     except RawContentRejected as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+        raise HTTPException(status_code=422, detail=_safe_validation_errors(exc)) from exc
 
     return evaluate_interaction_request(evaluation_request)
 
