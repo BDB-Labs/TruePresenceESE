@@ -1,0 +1,83 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_mixed_human_agent",
+    "tenant_id": "default",
+    "typing": {
+      "mean_inter_key_interval_ms": 170,
+      "inter_key_interval_stddev_ms": 58,
+      "characters_per_minute": 220,
+      "correction_count": 2,
+      "correction_rate": 0.04,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 380,
+      "prompt_render_to_first_input_ms": 920,
+      "typing_duration_ms": 3800,
+      "last_input_to_submit_ms": 190
+    },
+    "challenge": {
+      "challenge_type": "typing_cadence",
+      "response_latency_ms": 4100,
+      "expected_reading_time_ms": 1800,
+      "prompt_render_to_first_input_ms": 920,
+      "correction_count": 2,
+      "paste_count": 0,
+      "typing_duration_ms": 3800,
+      "submitted_exactly": false
+    },
+    "pointer": {
+      "pointer_entropy": 0.48,
+      "pointer_movement_count": 35,
+      "click_count": 3,
+      "click_hesitation_ms": 185,
+      "scroll_cadence_score": 0.52
+    },
+    "environment": {
+      "webdriver_detected": false,
+      "automation_framework_hint": false,
+      "headless_browser_hint": false,
+      "reduced_motion_enabled": false,
+      "timezone_offset_minutes": -300,
+      "viewport_width": 1440,
+      "viewport_height": 900
+    },
+    "agentic": {
+      "action_burst_count": 4,
+      "mean_burst_interval_ms": 2600,
+      "burst_interval_stddev_ms": 140,
+      "idle_to_action_latency_ms": 2400,
+      "exploratory_action_count": 0,
+      "route_directness_score": 0.95,
+      "large_instant_delta_count": 2,
+      "submit_after_instant_input_ms": 220,
+      "structured_retry_count": 2,
+      "validation_repair_count": 1
+    },
+    "session_continuity": {
+      "session_age_ms": 22000,
+      "prior_interaction_count": 3,
+      "focus_blur_count": 2,
+      "navigation_count": 1,
+      "same_device_session_count": 2
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 2,
+      "typing_summary": {
+        "delete_key_count": 2,
+        "input_event_count": 30,
+        "last_input_to_submit_ms": 190,
+        "max_inter_key_interval_ms": 380,
+        "min_inter_key_interval_ms": 92,
+        "tracked_field_count": 2
+      }
+    }
+  },
+  "signals": [],
+  "_meta": {
+    "expected_category": "mixed",
+    "description": "Human-plausible typing cadence and pointer behaviour combined with agentic burst/pause loops and route directness. Represents a supervised AI agent with a human in the loop or a human using agent-assisted tooling. Should produce contradictory signals and moderate confidence."
+  }
+}
