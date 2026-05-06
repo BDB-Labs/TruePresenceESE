@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -18,6 +19,8 @@ from ese.local_runtime import (
     ensure_local_runtime_ready,
     local_base_url,
 )
+
+logger = logging.getLogger(__name__)
 
 _RETRY_RNG = secrets.SystemRandom()
 MAX_RETRY_AFTER_SECONDS = 30.0
@@ -322,7 +325,8 @@ def _parse_retry_after(header_value: str | None) -> float | None:
             dt = dt.replace(tzinfo=timezone.utc)
         delta = (dt - now).total_seconds()
         return max(delta, 0) if delta > 0 else None
-    except Exception:
+    except (ValueError, TypeError, OverflowError) as exc:
+        logger.debug("Could not parse Retry-After header %r: %s", header_value, exc)
         return None
 
 

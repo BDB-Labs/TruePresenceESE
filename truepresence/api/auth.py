@@ -201,8 +201,8 @@ def _load_current_user_record(user_id: str) -> Dict[str, Any]:
     try:
         dist = DistributedRuntime()
         dist.store_session(f"user_cache:{user_id}", user_dict)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to store user record in cache (non-fatal): %s", exc)
 
     return user_dict
 
@@ -349,8 +349,8 @@ def update_user(user_id: int, request: UpdateUserRequest):
     # Invalidate cache
     try:
         DistributedRuntime().delete_session(f"user_cache:{user_id}")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to invalidate user cache after update (non-fatal): %s", exc)
 
     return dict(updated)
 
@@ -372,8 +372,8 @@ def deactivate_user(user_id: int):
     # Invalidate cache
     try:
         DistributedRuntime().delete_session(f"user_cache:{user_id}")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to invalidate user cache after deactivation (non-fatal): %s", exc)
 
     logger.info("Deactivated user: %s", user["email"])
     return {"status": "deactivated", "user_id": user_id}

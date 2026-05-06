@@ -132,6 +132,12 @@ def _verify_webhook_secret(request: Request, tenant_id: str) -> None:
 
 
 _ALLOWED_ENFORCEMENT_MODES = {"observe", "challenge_only", "review_required", "enforce"}
+_SAFETY_REVIEW_ACTIONS = {
+    "quarantine_message",
+    "restrict_sender",
+    "admin_review",
+    "mandatory_safety_escalation",
+}
 
 
 def _enforcement_mode_for_tenant(tenant_id: str) -> str:
@@ -262,8 +268,12 @@ class TelegramProtectionService:
                         candidate = stored_token
                         try:
                             candidate = decrypt_value(stored_token)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to decrypt stored bot token for tenant lookup; "
+                                "using token as-is: %s",
+                                exc,
+                            )
                         if candidate == bot_token:
                             return row["tenant_id"]
                     return None
@@ -392,6 +402,9 @@ class TelegramProtectionService:
         action["enforcement_mode"] = mode
         action["intended_action"] = original_action
 
+        if action.get("safety_escalation") and original_action in _SAFETY_REVIEW_ACTIONS:
+            return action
+
         if mode == "enforce":
             return action
 
@@ -456,6 +469,35 @@ class TelegramProtectionService:
         if action.get("action") == "allow":
             action["action"] = "alert_admin"
             action["reason"] = "Telegram community behavior review: " + ", ".join(reason_codes[:3])
+        return action
+
+    def _telegram_safety_from_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        context = event.get("context", {}) if isinstance(event, dict) else {}
+        safety = context.get("telegram_safety", {}) if isinstance(context, dict) else {}
+        return safety if isinstance(safety, dict) else {}
+
+    def _apply_telegram_safety_escalation(
+        self,
+        action: Dict[str, Any],
+        event: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        safety = self._telegram_safety_from_event(event)
+        reason_codes = list(safety.get("reason_codes", []))
+        evidence_card = safety.get("evidence_card", {})
+        recommended_action = safety.get("recommended_action")
+        if not reason_codes or recommended_action not in _SAFETY_REVIEW_ACTIONS:
+            return action
+
+        confidence = float(safety.get("confidence") or evidence_card.get("confidence") or 0.0)
+        action["action"] = recommended_action
+        action["reason"] = "Telegram safety escalation: " + ", ".join(reason_codes[:3])
+        action["confidence"] = max(float(action.get("confidence") or 0.0), confidence)
+        action["safety_escalation"] = True
+        action["safety_reason_codes"] = reason_codes
+        action["safety_evidence_card"] = dict(evidence_card)
+        action["threat_categories"] = list(
+            dict.fromkeys([*action.get("threat_categories", []), *reason_codes])
+        )
         return action
     
     async def _execute_action(self, action: Dict[str, Any], update: Dict[str, Any], tenant_id: str, decision_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -615,6 +657,7 @@ class TelegramProtectionService:
             # Convert to Telegram action
             action_obj = guard_adapter.enforce(decision_result.decision)
             action = action_obj.model_dump()
+            action = self._apply_telegram_safety_escalation(action, event)
             action = self._apply_telegram_community_recommendation(action, event)
             action = self._apply_enforcement_mode(action, tenant_id)
             
@@ -626,7 +669,7 @@ class TelegramProtectionService:
                 "risk_factors": result_dict["final"].get("risk_factors", []),
                 "reason_codes": result_dict["final"].get("reason_codes", []),
             }
-            action["evidence_card"] = build_telegram_community_evidence_card(
+            action["evidence_card"] = action.get("safety_evidence_card") or build_telegram_community_evidence_card(
                 event=event,
                 action=action,
                 evaluation=result_dict,
@@ -651,7 +694,7 @@ class TelegramProtectionService:
                 self.user_sessions[session_id] = session
 
             # Handle manual review cases
-            if action.get("action") == "alert_admin":
+            if action.get("action") == "alert_admin" or action.get("action") in _SAFETY_REVIEW_ACTIONS:
                 await self._handle_manual_review(action, update, result_dict, tenant_id)
             
             return action
@@ -1028,18 +1071,40 @@ class TelegramProtectionService:
                 action=action,
                 evaluation=result,
             )
-            review_data = {
-                "action": action,
-                "update": update,
-                "evaluation": result,
-                "evidence_card": evidence_card,
-                "user_info": source_message.get("from", {}),
-                "chat_info": source_message.get("chat", {}),
-                "message_text": source_message.get("text", ""),
-                "threat_categories": result["final"].get("threat_categories", []),
-                "risk_factors": result["final"].get("risk_factors", []),
-                "original_message": source_message
-            }
+            is_safety_review = (
+                action.get("safety_escalation")
+                or action.get("safety_evidence_card") is not None
+                or action.get("action") in _SAFETY_REVIEW_ACTIONS
+            )
+            if is_safety_review:
+                evidence = action.get("safety_evidence_card") or evidence_card
+                review_data = {
+                    "action": action,
+                    "evaluation": result,
+                    "evidence_card": evidence,
+                    "user_info": {"id": evidence.get("sender_id")},
+                    "chat_info": {"id": evidence.get("chat_id")},
+                    "telegram_refs": {
+                        "chat_id": evidence.get("chat_id"),
+                        "message_id": evidence.get("message_id"),
+                        "sender_id": evidence.get("sender_id"),
+                    },
+                    "threat_categories": result["final"].get("threat_categories", []),
+                    "risk_factors": result["final"].get("risk_factors", []),
+                }
+            else:
+                review_data = {
+                    "action": action,
+                    "update": update,
+                    "evaluation": result,
+                    "evidence_card": evidence_card,
+                    "user_info": source_message.get("from", {}),
+                    "chat_info": source_message.get("chat", {}),
+                    "message_text": source_message.get("text", ""),
+                    "threat_categories": result["final"].get("threat_categories", []),
+                    "risk_factors": result["final"].get("risk_factors", []),
+                    "original_message": source_message,
+                }
             
             # Add to pending reviews (tenant-isolated)
             review_id = self.add_pending_review(review_data, tenant_id)

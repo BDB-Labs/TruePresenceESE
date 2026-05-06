@@ -47,7 +47,8 @@ def _component_status() -> dict[str, Any]:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
         status["components"]["database"] = "ok"
-    except Exception:
+    except Exception as exc:
+        logger.warning("Health probe: database unavailable: %s", exc)
         status["components"]["database"] = "error"
         status["status"] = "degraded"
 
@@ -65,7 +66,8 @@ def _component_status() -> dict[str, Any]:
         else:
             status["components"]["redis"] = "unavailable"
             status["status"] = "degraded"
-    except Exception:
+    except Exception as exc:
+        logger.warning("Health probe: Redis unavailable: %s", exc)
         status["components"]["redis"] = "error"
         status["status"] = "degraded"
 
