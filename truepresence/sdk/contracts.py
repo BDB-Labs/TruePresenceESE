@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from truepresence.sdk.features import (
+    AgenticBehaviorFeatures,
     ChallengeInteractionFeatures,
     EnvironmentFeatures,
     ExternalRiskProviderFeatures,
@@ -32,6 +33,7 @@ class InteractionFeaturePacket(BaseModel):
     typing: TypingCadenceFeatures | None = None
     pointer: PointerBehaviorFeatures | None = None
     challenge: ChallengeInteractionFeatures | None = None
+    agentic: AgenticBehaviorFeatures | None = None
     session_continuity: SessionContinuityFeatures | None = None
     environment: EnvironmentFeatures | None = None
     external_risk_provider: list[ExternalRiskProviderFeatures] = Field(default_factory=list)

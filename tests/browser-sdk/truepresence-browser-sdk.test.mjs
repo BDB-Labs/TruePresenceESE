@@ -508,3 +508,35 @@ test("section allowlist strips unknown typing fields injected via beforeSend", a
     "unknown typing field must be stripped by section allowlist",
   );
 });
+
+test("agentic summary contains only aggregate browser-agent features", async () => {
+  const field = new FakeField();
+  const harness = createHarness([field]);
+  const sdk = initHarness(harness);
+  sdk.protectForm("#signup-form");
+
+  field.dispatchEvent(event("focus"));
+  harness.tick(2600);
+  field.value = "agent generated private text that must not leave the browser";
+  field.dispatchEvent(event("input"));
+  harness.tick(40);
+  harness.document.dispatchEvent(event("click"));
+  harness.tick(40);
+  field.value = "agent generated private text that must not leave the browser!";
+  field.dispatchEvent(event("input"));
+  harness.tick(3000);
+  harness.document.dispatchEvent(event("click"));
+  harness.tick(30);
+  harness.form.dispatchEvent(event("submit"));
+
+  const payload = harness.calls[0].payload;
+  const agentic = payload.feature_packet.agentic;
+  const body = JSON.stringify(payload);
+
+  assert.equal(agentic.large_instant_delta_count, 1);
+  assert.equal(agentic.action_burst_count >= 1, true);
+  assert.equal(agentic.exploratory_action_count, 0);
+  assert.equal(agentic.validation_repair_count, 1);
+  assert.equal(body.includes("agent generated private text"), false);
+  assert.equal(body.includes("clientX"), false);
+});

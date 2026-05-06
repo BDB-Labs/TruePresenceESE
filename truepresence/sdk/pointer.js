@@ -14,6 +14,7 @@ function shannonEntropy(counts) {
 }
 
 export function createPointerSummaryCollector({ document, now }) {
+  const actionTimestamps = [];
   let clickCount = 0;
   let clickHesitationTotal = 0;
   let clickHesitationCount = 0;
@@ -27,6 +28,7 @@ export function createPointerSummaryCollector({ document, now }) {
 
   function onMove(event) {
     const timestamp = safeNow(now);
+    actionTimestamps.push(timestamp);
     movementCount += 1;
     if (lastMove) {
       const dx = Number(event.clientX || 0) - lastMove.x;
@@ -47,6 +49,7 @@ export function createPointerSummaryCollector({ document, now }) {
 
   function onClick() {
     const timestamp = safeNow(now);
+    actionTimestamps.push(timestamp);
     clickCount += 1;
     if (lastMoveAt !== null) {
       clickHesitationTotal += Math.max(0, timestamp - lastMoveAt);
@@ -56,6 +59,7 @@ export function createPointerSummaryCollector({ document, now }) {
 
   function onScroll() {
     const timestamp = safeNow(now);
+    actionTimestamps.push(timestamp);
     scrollCount += 1;
     if (lastScrollAt !== null) {
       scrollIntervals.push(timestamp - lastScrollAt);
@@ -92,5 +96,16 @@ export function createPointerSummaryCollector({ document, now }) {
     };
   }
 
-  return { start, stop, summarize };
+  function summarizeAgentic() {
+    const exploratoryActionCount = movementCount + scrollCount;
+    const routeActionCount = exploratoryActionCount + clickCount;
+    return {
+      exploratory_action_count: exploratoryActionCount,
+      route_directness_score:
+        routeActionCount > 0 ? clickCount / routeActionCount : undefined,
+      _action_timestamps: actionTimestamps.slice(),
+    };
+  }
+
+  return { start, stop, summarize, summarizeAgentic };
 }

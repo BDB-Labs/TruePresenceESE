@@ -6,8 +6,8 @@ Enforcement strategy: two complementary layers.
 
 Layer 1 — Section-level allowlist
   For each structured section of a feature_packet (typing, challenge, pointer,
-  environment, session_continuity, external_risk_provider, page_context, and
-  metadata), only fields on the explicit allowlist are accepted. Any key not on
+  agentic, environment, session_continuity, external_risk_provider,
+  page_context, and metadata), only fields on the explicit allowlist are accepted. Any key not on
   the list is rejected; section schemas are closed by design.
 
 Layer 2 — Global raw-content denylist
@@ -92,6 +92,21 @@ _ALLOWED_ENVIRONMENT_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+_ALLOWED_AGENTIC_FIELDS: frozenset[str] = frozenset(
+    {
+        "action_burst_count",
+        "burst_interval_stddev_ms",
+        "exploratory_action_count",
+        "idle_to_action_latency_ms",
+        "large_instant_delta_count",
+        "mean_burst_interval_ms",
+        "route_directness_score",
+        "structured_retry_count",
+        "submit_after_instant_input_ms",
+        "validation_repair_count",
+    }
+)
+
 _ALLOWED_SESSION_CONTINUITY_FIELDS: frozenset[str] = frozenset(
     {
         "focus_blur_count",
@@ -145,6 +160,7 @@ _ALLOWED_EXTERNAL_RISK_FIELDS: frozenset[str] = frozenset(
 
 # Top-level feature_packet keys that have their own sub-allowlists:
 _SECTION_ALLOWLISTS: dict[str, frozenset[str]] = {
+    "agentic": _ALLOWED_AGENTIC_FIELDS,
     "typing": _ALLOWED_TYPING_FIELDS,
     "challenge": _ALLOWED_CHALLENGE_FIELDS,
     "pointer": _ALLOWED_POINTER_FIELDS,
@@ -156,6 +172,7 @@ _SECTION_ALLOWLISTS: dict[str, frozenset[str]] = {
 # Top-level feature_packet scalar/identity fields — no sub-key enforcement:
 _ALLOWED_PACKET_TOP_LEVEL: frozenset[str] = frozenset(
     {
+        "agentic",
         "challenge",
         "environment",
         "external_risk_provider",
@@ -516,4 +533,5 @@ ALLOWED_AGGREGATE_FIELDS = (
     _ALLOWED_TYPING_FIELDS
     | _ALLOWED_CHALLENGE_FIELDS
     | _ALLOWED_POINTER_FIELDS
+    | _ALLOWED_AGENTIC_FIELDS
 )

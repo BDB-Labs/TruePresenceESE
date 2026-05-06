@@ -89,6 +89,79 @@ function environmentFeatures(win, doc) {
   };
 }
 
+function mean(values) {
+  if (!values.length) return undefined;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function stddev(values) {
+  if (values.length < 2) return 0;
+  const avg = mean(values);
+  const variance = mean(values.map((value) => (value - avg) ** 2));
+  return Math.sqrt(variance);
+}
+
+function actionBurstFeatures(actionTimestamps, startedAt) {
+  const sorted = [...new Set(actionTimestamps)]
+    .filter((timestamp) => Number.isFinite(timestamp))
+    .sort((a, b) => a - b);
+  if (!sorted.length) {
+    return {
+      action_burst_count: 0,
+      burst_interval_stddev_ms: undefined,
+      idle_to_action_latency_ms: undefined,
+      mean_burst_interval_ms: undefined,
+    };
+  }
+
+  const burstStarts = [];
+  let currentBurstStart = sorted[0];
+  let currentBurstSize = 1;
+  for (let index = 1; index < sorted.length; index += 1) {
+    const gap = sorted[index] - sorted[index - 1];
+    if (gap <= 250) {
+      currentBurstSize += 1;
+      continue;
+    }
+    if (currentBurstSize >= 2) {
+      burstStarts.push(currentBurstStart);
+    }
+    currentBurstStart = sorted[index];
+    currentBurstSize = 1;
+  }
+  if (currentBurstSize >= 2) {
+    burstStarts.push(currentBurstStart);
+  }
+
+  const burstIntervals = [];
+  for (let index = 1; index < burstStarts.length; index += 1) {
+    burstIntervals.push(burstStarts[index] - burstStarts[index - 1]);
+  }
+
+  return {
+    action_burst_count: burstStarts.length,
+    burst_interval_stddev_ms: burstIntervals.length ? stddev(burstIntervals) : undefined,
+    idle_to_action_latency_ms: sorted[0] - startedAt,
+    mean_burst_interval_ms: mean(burstIntervals),
+  };
+}
+
+function agenticFeatures({ pointerAgentic, startedAt, typingAgentic }) {
+  const actionTimestamps = [
+    ...(typingAgentic?._action_timestamps || []),
+    ...(pointerAgentic?._action_timestamps || []),
+  ];
+  return {
+    ...actionBurstFeatures(actionTimestamps, startedAt),
+    exploratory_action_count: pointerAgentic?.exploratory_action_count,
+    large_instant_delta_count: typingAgentic?.large_instant_delta_count,
+    route_directness_score: pointerAgentic?.route_directness_score,
+    structured_retry_count: typingAgentic?.structured_retry_count,
+    submit_after_instant_input_ms: typingAgentic?.submit_after_instant_input_ms,
+    validation_repair_count: typingAgentic?.validation_repair_count,
+  };
+}
+
 function pruneUndefined(value) {
   if (Array.isArray(value)) {
     return value.map(pruneUndefined);
@@ -268,7 +341,14 @@ export class TruePresenceBrowserSDK {
   #featurePacket() {
     const typingSnapshot = this.typingCollector.summarize(this.now());
     const challenge = normalizeChallengeFeatures(typingSnapshot.challenge);
+    const pointer = this.pointerCollector.summarize();
+    const pointerAgentic = this.pointerCollector.summarizeAgentic();
     return pruneUndefined({
+      agentic: agenticFeatures({
+        pointerAgentic,
+        startedAt: this.startedAt,
+        typingAgentic: typingSnapshot.agentic,
+      }),
       challenge,
       environment: environmentFeatures(this.window, this.document),
       metadata: {
@@ -278,7 +358,7 @@ export class TruePresenceBrowserSDK {
         typing_summary: typingSnapshot.typingSummary,
       },
       page_context: pageContext(this.window, this.document),
-      pointer: this.pointerCollector.summarize(),
+      pointer,
       session_continuity: {
         focus_blur_count: this.focusBlurCount,
         session_age_ms: this.now() - this.startedAt,

@@ -59,6 +59,19 @@ class EnvironmentFeatures(PrivacySafeFeatureModel):
     viewport_height: int | None = Field(default=None, ge=0)
 
 
+class AgenticBehaviorFeatures(PrivacySafeFeatureModel):
+    action_burst_count: int | None = Field(default=None, ge=0)
+    mean_burst_interval_ms: float | None = Field(default=None, ge=0)
+    burst_interval_stddev_ms: float | None = Field(default=None, ge=0)
+    idle_to_action_latency_ms: float | None = Field(default=None, ge=0)
+    exploratory_action_count: int | None = Field(default=None, ge=0)
+    route_directness_score: float | None = Field(default=None, ge=0, le=1)
+    large_instant_delta_count: int | None = Field(default=None, ge=0)
+    submit_after_instant_input_ms: float | None = Field(default=None, ge=0)
+    structured_retry_count: int | None = Field(default=None, ge=0)
+    validation_repair_count: int | None = Field(default=None, ge=0)
+
+
 class ExternalRiskProviderFeatures(PrivacySafeFeatureModel):
     provider_id: str
     risk_score: float = Field(ge=0, le=1)

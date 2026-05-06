@@ -26,10 +26,14 @@ function dataValue(field, key) {
   return field?.dataset?.[key];
 }
 
+const LARGE_INSTANT_DELTA_THRESHOLD = 20;
+
 export function createTypingCadenceCollector({ now }) {
+  const actionTimestamps = [];
   const fieldStates = new WeakMap();
   const trackedFields = [];
   let submitAt = null;
+  let submitCount = 0;
 
   function ensureState(field, options = {}) {
     let state = fieldStates.get(field);
@@ -45,9 +49,14 @@ export function createTypingCadenceCollector({ now }) {
         lastInputAt: null,
         lastKeyAt: null,
         lastLength: null,
+        lastLargeInstantDeltaAt: null,
+        largeInstantDeltaCount: 0,
         pasteCount: 0,
         promptRenderAt: options.promptRenderAt ?? safeNow(now),
+        sawLargeInstantDelta: false,
+        structuredRetryCount: 0,
         totalInsertedLength: 0,
+        validationRepairCount: 0,
         challengeType: options.challengeType || "typing_cadence",
         expectedReadingTimeMs:
           options.expectedReadingTimeMs ??
@@ -83,12 +92,18 @@ export function createTypingCadenceCollector({ now }) {
 
     field.addEventListener("paste", () => {
       state.pasteCount += 1;
+      actionTimestamps.push(safeNow(now));
+    });
+
+    field.addEventListener("invalid", () => {
+      state.structuredRetryCount += 1;
     });
 
     field.addEventListener("input", () => {
       const timestamp = safeNow(now);
       const length = lengthOfFieldValue(field);
       const previousLength = state.lastLength;
+      actionTimestamps.push(timestamp);
       state.inputEventCount += 1;
       if (state.firstInputAt === null) {
         state.firstInputAt = timestamp;
@@ -99,8 +114,18 @@ export function createTypingCadenceCollector({ now }) {
         const delta = length - previousLength;
         if (delta > 0) {
           state.totalInsertedLength += delta;
+          if (delta >= LARGE_INSTANT_DELTA_THRESHOLD) {
+            state.largeInstantDeltaCount += 1;
+            state.lastLargeInstantDeltaAt = timestamp;
+            state.sawLargeInstantDelta = true;
+          } else if (state.sawLargeInstantDelta && state.inputEventCount > 1) {
+            state.validationRepairCount += 1;
+          }
         } else if (delta < 0) {
           state.correctionCount += 1;
+          if (state.sawLargeInstantDelta) {
+            state.validationRepairCount += 1;
+          }
         }
       }
       state.lastLength = length;
@@ -111,6 +136,8 @@ export function createTypingCadenceCollector({ now }) {
 
   function markSubmit() {
     submitAt = safeNow(now);
+    submitCount += 1;
+    actionTimestamps.push(submitAt);
   }
 
   function summarize(currentNow = safeNow(now)) {
@@ -122,9 +149,13 @@ export function createTypingCadenceCollector({ now }) {
       inputEventCount: 0,
       intervals: [],
       lastInputAt: null,
+      lastLargeInstantDeltaAt: null,
+      largeInstantDeltaCount: 0,
       pasteCount: 0,
       promptRenderAt: null,
+      structuredRetryCount: 0,
       totalInsertedLength: 0,
+      validationRepairCount: 0,
     };
     const challenge = {
       correctionCount: 0,
@@ -145,8 +176,11 @@ export function createTypingCadenceCollector({ now }) {
       aggregate.deleteKeyCount += state.deleteKeyCount;
       aggregate.inputEventCount += state.inputEventCount;
       aggregate.intervals.push(...state.intervals);
+      aggregate.largeInstantDeltaCount += state.largeInstantDeltaCount;
       aggregate.pasteCount += state.pasteCount;
+      aggregate.structuredRetryCount += state.structuredRetryCount;
       aggregate.totalInsertedLength += state.totalInsertedLength;
+      aggregate.validationRepairCount += state.validationRepairCount;
 
       if (state.focusAt !== null && (aggregate.firstFocusAt === null || state.focusAt < aggregate.firstFocusAt)) {
         aggregate.firstFocusAt = state.focusAt;
@@ -156,6 +190,13 @@ export function createTypingCadenceCollector({ now }) {
       }
       if (state.lastInputAt !== null && (aggregate.lastInputAt === null || state.lastInputAt > aggregate.lastInputAt)) {
         aggregate.lastInputAt = state.lastInputAt;
+      }
+      if (
+        state.lastLargeInstantDeltaAt !== null &&
+        (aggregate.lastLargeInstantDeltaAt === null ||
+          state.lastLargeInstantDeltaAt > aggregate.lastLargeInstantDeltaAt)
+      ) {
+        aggregate.lastLargeInstantDeltaAt = state.lastLargeInstantDeltaAt;
       }
       if (
         state.promptRenderAt !== null &&
@@ -234,6 +275,17 @@ export function createTypingCadenceCollector({ now }) {
       tracked_field_count: trackedFields.length,
     };
 
+    const agentic = {
+      large_instant_delta_count: aggregate.largeInstantDeltaCount,
+      structured_retry_count: aggregate.structuredRetryCount + Math.max(0, submitCount - 1),
+      submit_after_instant_input_ms:
+        submitAt !== null && aggregate.lastLargeInstantDeltaAt !== null
+          ? submitAt - aggregate.lastLargeInstantDeltaAt
+          : undefined,
+      validation_repair_count: aggregate.validationRepairCount,
+      _action_timestamps: actionTimestamps.slice(),
+    };
+
     const challengeSummary =
       challenge.inputCount > 0
         ? {
@@ -254,7 +306,7 @@ export function createTypingCadenceCollector({ now }) {
           }
         : null;
 
-    return { challenge: challengeSummary, typing, typingSummary };
+    return { agentic, challenge: challengeSummary, typing, typingSummary };
   }
 
   return {

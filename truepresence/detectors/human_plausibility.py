@@ -132,6 +132,7 @@ def zero_correction_pattern(features: TypingCadenceFeatures | None) -> list[Dete
 
 
 def run_human_plausibility_detectors(packet: InteractionFeaturePacket) -> list[DetectorSignal]:
+    from truepresence.detectors.agentic_control import run_agentic_control_detectors
     from truepresence.detectors.reading_time import implausible_read_response_time
     from truepresence.detectors.typing_cadence import uniform_typing_cadence
 
@@ -140,4 +141,5 @@ def run_human_plausibility_detectors(packet: InteractionFeaturePacket) -> list[D
     signals.extend(uniform_typing_cadence(packet.typing))
     signals.extend(paste_or_instant_input(packet.typing))
     signals.extend(zero_correction_pattern(packet.typing))
+    signals.extend(run_agentic_control_detectors(packet.agentic))
     return signals

@@ -11,7 +11,7 @@
  * Layer 2 — Section-level allowlists
  *   stripRawContent() applies section allowlists when processing the known
  *   structured sections of feature_packet (typing, challenge, pointer,
- *   environment, session_continuity, page_context, metadata, and
+ *   agentic, environment, session_continuity, page_context, metadata, and
  *   external_risk_provider). Any key not on the allowlist is stripped before
  *   the payload leaves the browser.
  *
@@ -149,6 +149,19 @@ const ALLOWED_ENVIRONMENT_FIELDS = new Set([
   "webdriver_detected",
 ]);
 
+const ALLOWED_AGENTIC_FIELDS = new Set([
+  "action_burst_count",
+  "burst_interval_stddev_ms",
+  "exploratory_action_count",
+  "idle_to_action_latency_ms",
+  "large_instant_delta_count",
+  "mean_burst_interval_ms",
+  "route_directness_score",
+  "structured_retry_count",
+  "submit_after_instant_input_ms",
+  "validation_repair_count",
+]);
+
 const ALLOWED_SESSION_CONTINUITY_FIELDS = new Set([
   "focus_blur_count",
   "navigation_count",
@@ -188,6 +201,7 @@ const ALLOWED_EXTERNAL_RISK_PROVIDER_FIELDS = new Set([
 ]);
 
 const ALLOWED_PACKET_FIELDS = new Set([
+  "agentic",
   "challenge",
   "environment",
   "external_risk_provider",
@@ -211,6 +225,7 @@ const ALLOWED_REQUEST_FIELDS = new Set([
 
 /** Map from feature_packet section key → its field allowlist. */
 const SECTION_ALLOWLISTS = new Map([
+  ["agentic", ALLOWED_AGENTIC_FIELDS],
   ["typing", ALLOWED_TYPING_FIELDS],
   ["challenge", ALLOWED_CHALLENGE_FIELDS],
   ["pointer", ALLOWED_POINTER_FIELDS],
