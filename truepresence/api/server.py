@@ -15,6 +15,7 @@ from truepresence.core.runtime import (
 )
 from truepresence.core.session import Session
 from truepresence.exceptions import TruePresenceError
+from truepresence.evidence.sdk_artifacts import sdk_evidence_store
 from truepresence.sdk.contracts import (
     TruePresenceEvaluationRequest,
     TruePresenceEvaluationResponse,
@@ -298,6 +299,15 @@ async def evaluate_interaction(request: Request):
         raise HTTPException(status_code=422, detail=_safe_validation_errors(exc)) from exc
 
     return evaluate_interaction_request(evaluation_request)
+
+
+@app.get("/v1/truepresence/evidence/{evidence_packet_id}")
+def get_sdk_evidence_artifact(evidence_packet_id: str):
+    """Retrieve a content-minimized SDK/web evaluation evidence artifact."""
+    artifact = sdk_evidence_store.get(evidence_packet_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Evidence artifact not found")
+    return artifact.model_dump(mode="json")
 
 
 @app.get("/health")

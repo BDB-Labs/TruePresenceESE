@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from truepresence.detectors.human_plausibility import run_human_plausibility_detectors
+from truepresence.evidence.sdk_artifacts import persist_sdk_evidence_artifact
 from truepresence.scoring.model import score_interaction
 from truepresence.sdk.contracts import (
     TruePresenceEvaluationRequest,
@@ -20,8 +21,15 @@ def evaluate_interaction_request(
         }
     )
     signals = run_human_plausibility_detectors(packet)
-    return score_interaction(
+    response = score_interaction(
         signals=signals,
         feature_packet=packet,
         enforcement_mode=request.enforcement_mode,
     )
+    persist_sdk_evidence_artifact(
+        packet=packet,
+        response=response,
+        signals=signals,
+        enforcement_mode=request.enforcement_mode,
+    )
+    return response
