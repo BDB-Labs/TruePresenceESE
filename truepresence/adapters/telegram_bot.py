@@ -1078,6 +1078,11 @@ class TelegramProtectionService:
             )
             if is_safety_review:
                 evidence = action.get("safety_evidence_card") or evidence_card
+                reason_codes = (
+                    result["final"].get("threat_categories", [])
+                    or action.get("safety_reason_codes", [])
+                    or evidence.get("reason_codes", [])
+                )
                 review_data = {
                     "action": action,
                     "evaluation": result,
@@ -1089,8 +1094,8 @@ class TelegramProtectionService:
                         "message_id": evidence.get("message_id"),
                         "sender_id": evidence.get("sender_id"),
                     },
-                    "threat_categories": result["final"].get("threat_categories", []),
-                    "risk_factors": result["final"].get("risk_factors", []),
+                    "threat_categories": reason_codes,
+                    "risk_factors": result["final"].get("risk_factors", []) or reason_codes,
                 }
             else:
                 review_data = {

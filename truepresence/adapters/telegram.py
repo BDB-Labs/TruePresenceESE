@@ -17,6 +17,11 @@ from truepresence.adapters.telegram_models import TelegramAction, TelegramEvent
 from truepresence.db import get_db
 from truepresence.detectors.telegram_community import run_telegram_community_detectors
 from truepresence.exceptions import EvidenceError
+from truepresence.safety import (
+    ProviderRiskSignal,
+    TelegramSafetyFeatures,
+    evaluate_telegram_safety_escalation,
+)
 from truepresence.surfaces.telegram.community import TelegramCommunityFeatures
 
 logger = logging.getLogger(__name__)
@@ -131,6 +136,8 @@ class TelegramAdapter:
         self._chat_join_times: Dict[str, deque] = defaultdict(lambda: deque(maxlen=250))
         self._chat_message_times: Dict[str, deque] = defaultdict(lambda: deque(maxlen=250))
         self._user_joined_groups: Dict[str, deque] = defaultdict(lambda: deque(maxlen=50))
+        self._user_media_times: Dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
+        self._chat_media_times: Dict[str, deque] = defaultdict(lambda: deque(maxlen=250))
 
         # Apply tenant-specific configuration
         self._configure_detectors()
@@ -247,6 +254,20 @@ class TelegramAdapter:
             f"telegram_community_{signal.reason_code}": signal.confidence
             for signal in community_signals
         }
+        safety_features = self._build_safety_features_for_message(
+            user_id=user_id,
+            chat_id=str(chat.get("id", "unknown")),
+            timestamp=msg_timestamp,
+            message=message,
+            community_features=community_features,
+            account_age_days=self._estimate_account_age(from_user),
+        )
+        provider_signal = self._provider_signal_for_media(safety_features)
+        safety_escalation = evaluate_telegram_safety_escalation(
+            safety_features,
+            provider_signal=provider_signal,
+        )
+        safety = self._safety_context(safety_escalation, safety_features)
 
         return {
             "event_type": "message",
@@ -291,6 +312,7 @@ class TelegramAdapter:
                 "is_bot": from_user.get("is_bot", False),
                 "group_id": chat.get("id"),
                 "telegram_community": community,
+                "telegram_safety": safety,
             },
             "threat_analysis": threat_analysis
         }
@@ -627,6 +649,141 @@ class TelegramAdapter:
         cutoff = float(timestamp) - 60
         while recent and recent[0][0] < cutoff:
             recent.popleft()
+
+    def _build_safety_features_for_message(
+        self,
+        *,
+        user_id: str,
+        chat_id: str,
+        timestamp: float,
+        message: Dict[str, Any],
+        community_features: TelegramCommunityFeatures,
+        account_age_days: int,
+    ) -> TelegramSafetyFeatures:
+        media_present = self._message_has_media(message)
+        media_summary = self._media_interval_summary(user_id, timestamp, media_present)
+        synchronized_media_peer_count = self._synchronized_media_peer_count(
+            chat_id,
+            user_id,
+            timestamp,
+        )
+        if media_present:
+            self._record_media_cluster(chat_id, user_id, timestamp)
+
+        return TelegramSafetyFeatures(
+            chat_id=message.get("chat", {}).get("id"),
+            message_id=message.get("message_id"),
+            sender_id=message.get("from", {}).get("id"),
+            event_timestamp=timestamp,
+            event_type="message",
+            media_present=media_present,
+            join_to_first_media_ms=community_features.join_to_first_media_ms,
+            media_count_window=media_summary["media_count_window"],
+            media_burst_count=media_summary["media_burst_count"],
+            synchronized_media_peer_count=synchronized_media_peer_count if media_present else 0,
+            group_hop_count=community_features.group_hop_count or 0,
+            account_age_days=account_age_days,
+            rapid_delete_repost_count=0,
+        )
+
+    def _media_interval_summary(
+        self,
+        user_id: str,
+        timestamp: float,
+        media_present: bool,
+    ) -> Dict[str, int | float | None]:
+        recent = self._user_media_times[user_id]
+        if media_present:
+            recent.append(float(timestamp))
+        cutoff = float(timestamp) - 60
+        while recent and recent[0] < cutoff:
+            recent.popleft()
+
+        media_times = list(recent)
+        intervals = [
+            max(0.0, (right - left) * 1000)
+            for left, right in zip(media_times, media_times[1:], strict=False)
+        ]
+        return {
+            "media_count_window": len(media_times),
+            "media_burst_count": sum(1 for interval in intervals if interval <= 10_000),
+        }
+
+    def _synchronized_media_peer_count(self, chat_id: str, user_id: str, timestamp: float) -> int:
+        recent = self._chat_media_times[chat_id]
+        cutoff = float(timestamp) - 10
+        while recent and recent[0][0] < cutoff:
+            recent.popleft()
+        return len({peer_id for _, peer_id in recent if peer_id != user_id})
+
+    def _record_media_cluster(self, chat_id: str, user_id: str, timestamp: float) -> None:
+        recent = self._chat_media_times[chat_id]
+        recent.append((float(timestamp), user_id))
+        cutoff = float(timestamp) - 60
+        while recent and recent[0][0] < cutoff:
+            recent.popleft()
+
+    def _provider_signal_for_media(
+        self,
+        features: TelegramSafetyFeatures,
+    ) -> ProviderRiskSignal | None:
+        if not features.media_present:
+            return None
+        provider = self.tenant_config.get("safety_provider") or self.tenant_config.get("media_risk_provider")
+        if provider is None:
+            return None
+        metadata = {
+            "chat_id": features.chat_id,
+            "message_id": features.message_id,
+            "sender_id": features.sender_id,
+            "event_timestamp": features.event_timestamp,
+            "event_type": features.event_type,
+            "media_present": features.media_present,
+        }
+        result = None
+        if hasattr(provider, "assess_telegram_media"):
+            result = provider.assess_telegram_media(metadata)
+        elif callable(provider):
+            result = provider(metadata)
+        if result is None:
+            return None
+        if isinstance(result, ProviderRiskSignal):
+            return result
+        if isinstance(result, dict):
+            return ProviderRiskSignal(**result)
+        raise TypeError("safety provider must return ProviderRiskSignal, dict, or None")
+
+    def _safety_context(self, escalation, features: TelegramSafetyFeatures) -> Dict[str, Any]:
+        if escalation is None:
+            return {
+                "reason_codes": [],
+                "recommended_action": None,
+                "risk": {"score": 0.0, "label": "low"},
+                "evidence_card": {
+                    "chat_id": features.chat_id,
+                    "message_id": features.message_id,
+                    "sender_id": features.sender_id,
+                    "timestamps": {"event_timestamp": features.event_timestamp},
+                    "media_present": features.media_present,
+                    "event_type": features.event_type,
+                    "reason_codes": [],
+                    "risk": {"score": 0.0, "label": "low"},
+                    "confidence": 0.0,
+                    "risk_label": "low",
+                    "recommended_action": None,
+                },
+            }
+        return {
+            "reason_codes": list(escalation.reason_codes),
+            "recommended_action": escalation.recommended_action,
+            "risk": {
+                "score": round(escalation.risk_score, 3),
+                "label": escalation.risk_label,
+            },
+            "confidence": round(escalation.confidence, 3),
+            "detector_signals": list(escalation.detector_signals),
+            "evidence_card": dict(escalation.evidence_card),
+        }
 
     def _message_has_link_entity(self, message: Dict[str, Any]) -> bool:
         for key in ("entities", "caption_entities"):
