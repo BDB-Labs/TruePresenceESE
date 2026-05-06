@@ -1,0 +1,37 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_low_evidence",
+    "tenant_id": "default",
+    "typing": {
+      "correction_count": 0,
+      "correction_rate": 0,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 180
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 1,
+      "typing_summary": {
+        "delete_key_count": 0,
+        "input_event_count": 1,
+        "last_input_to_submit_ms": 0,
+        "max_inter_key_interval_ms": 0,
+        "min_inter_key_interval_ms": 0,
+        "tracked_field_count": 1
+      }
+    }
+  },
+  "signals": [
+    {
+      "reason_code": "zero_correction_pattern",
+      "severity": "low",
+      "confidence": 0.35,
+      "contribution_target": "automation",
+      "category": "typing_cadence",
+      "explanation": "Sparse aggregate metrics show no corrections, which is weak evidence alone."
+    }
+  ]
+}

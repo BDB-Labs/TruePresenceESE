@@ -14,16 +14,23 @@ the new requirements specified in feature/scoring-calibration-v1:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from truepresence.detectors.human_plausibility import DetectorSignal
 from truepresence.scoring.model import score_interaction
-from truepresence.sdk.contracts import InteractionFeaturePacket
+from truepresence.sdk.contracts import InteractionFeaturePacket, TruePresenceEvaluationResponse
 from truepresence.sdk.features import (
     ChallengeInteractionFeatures,
     PointerBehaviorFeatures,
     TypingCadenceFeatures,
 )
+from truepresence.sdk.privacy import ensure_privacy_safe_feature_packet
+
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +95,21 @@ def _human_packet() -> InteractionFeaturePacket:
             scroll_cadence_score=0.63,
         ),
     )
+
+
+def _load_scenario(name: str) -> tuple[InteractionFeaturePacket, list[DetectorSignal]]:
+    data = json.loads((FIXTURE_DIR / f"{name}.json").read_text())
+    feature_packet = data["feature_packet"]
+    ensure_privacy_safe_feature_packet(feature_packet)
+    return (
+        InteractionFeaturePacket.model_validate(feature_packet),
+        [DetectorSignal.model_validate(signal) for signal in data.get("signals", [])],
+    )
+
+
+def _score_scenario(name: str) -> TruePresenceEvaluationResponse:
+    packet, signals = _load_scenario(name)
+    return score_interaction(signals=signals, feature_packet=packet)
 
 
 # ---------------------------------------------------------------------------
@@ -327,3 +349,104 @@ def test_high_risk_low_confidence_does_not_escalate_to_manual_review() -> None:
         feature_packet=_empty_packet(),
     )
     assert result.recommended_action != "manual_review"
+
+
+# ---------------------------------------------------------------------------
+# Fixture-backed calibration scenarios
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "human_like_session",
+        "scripted_bot_session",
+        "low_evidence_session",
+        "contradictory_session",
+    ],
+)
+def test_scoring_fixture_feature_packets_are_privacy_safe(fixture_name: str) -> None:
+    _load_scenario(fixture_name)
+
+
+def test_human_like_fixture_scores_human_above_automation() -> None:
+    result = _score_scenario("human_like_session")
+
+    assert result.human_presence_likelihood > result.automation_likelihood
+    assert result.human_presence_likelihood >= 0.55
+    assert result.recommended_action in {"allow", "observe"}
+
+
+def test_scripted_bot_fixture_produces_elevated_automation_likelihood() -> None:
+    result = _score_scenario("scripted_bot_session")
+
+    assert result.automation_likelihood >= 0.55
+    assert result.automation_likelihood > result.human_presence_likelihood
+    assert result.recommended_action in {"step_up_auth", "manual_review"}
+
+
+def test_low_evidence_fixture_caps_confidence() -> None:
+    result = _score_scenario("low_evidence_session")
+
+    assert result.confidence < 0.50
+    assert result.recommended_action in {"allow", "observe", "soft_challenge"}
+
+
+def test_contradictory_fixture_reduces_confidence_vs_clean_high_risk() -> None:
+    contradictory_packet, contradictory_signals = _load_scenario("contradictory_session")
+    clean_risk_signals = [
+        signal
+        for signal in contradictory_signals
+        if signal.contribution_target in {"automation", "agentic_control"}
+    ]
+
+    clean_high_risk = score_interaction(
+        signals=clean_risk_signals,
+        feature_packet=_empty_packet(),
+    )
+    contradictory = score_interaction(
+        signals=contradictory_signals,
+        feature_packet=contradictory_packet,
+    )
+
+    assert contradictory.confidence < clean_high_risk.confidence
+    assert contradictory.human_presence_likelihood > clean_high_risk.human_presence_likelihood
+
+
+def test_repeated_same_category_fixture_signals_do_not_produce_runaway_risk() -> None:
+    repeated_same_category = score_interaction(
+        signals=[
+            _auto_signal(f"same_category_{index}", "high", 0.9, "typing_cadence")
+            for index in range(12)
+        ],
+        feature_packet=_empty_packet(),
+    )
+
+    assert repeated_same_category.automation_likelihood < 0.75
+    assert repeated_same_category.recommended_action != "manual_review"
+
+
+def test_cross_category_fixture_signals_raise_risk_more_than_same_category() -> None:
+    same_category = score_interaction(
+        signals=[
+            _auto_signal("same_a", "high", 0.9, "typing_cadence"),
+            _auto_signal("same_b", "high", 0.9, "typing_cadence"),
+        ],
+        feature_packet=_empty_packet(),
+    )
+    cross_category = score_interaction(
+        signals=[
+            _auto_signal("cross_a", "high", 0.9, "typing_cadence"),
+            _auto_signal("cross_b", "high", 0.9, "input_method"),
+        ],
+        feature_packet=_empty_packet(),
+    )
+
+    assert cross_category.automation_likelihood > same_category.automation_likelihood
+    assert cross_category.confidence > same_category.confidence
+
+
+def test_generic_automation_fixture_does_not_inflate_agentic_control() -> None:
+    result = _score_scenario("scripted_bot_session")
+
+    assert result.automation_likelihood >= 0.55
+    assert result.agentic_control_likelihood < 0.25

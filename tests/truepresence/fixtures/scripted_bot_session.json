@@ -1,0 +1,92 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_scripted_bot",
+    "tenant_id": "default",
+    "typing": {
+      "mean_inter_key_interval_ms": 12,
+      "inter_key_interval_stddev_ms": 2,
+      "characters_per_minute": 920,
+      "correction_count": 0,
+      "correction_rate": 0,
+      "paste_count": 1,
+      "focus_to_first_input_ms": 12,
+      "prompt_render_to_first_input_ms": 24,
+      "typing_duration_ms": 80,
+      "last_input_to_submit_ms": 15
+    },
+    "challenge": {
+      "challenge_type": "typing_cadence",
+      "response_latency_ms": 145,
+      "expected_reading_time_ms": 1800,
+      "prompt_render_to_first_input_ms": 24,
+      "correction_count": 0,
+      "paste_count": 1,
+      "typing_duration_ms": 80,
+      "submitted_exactly": true
+    },
+    "pointer": {
+      "pointer_entropy": 0.04,
+      "pointer_movement_count": 1,
+      "click_count": 1,
+      "click_hesitation_ms": 0,
+      "scroll_cadence_score": 0.02
+    },
+    "environment": {
+      "webdriver_detected": true,
+      "automation_framework_hint": true,
+      "headless_browser_hint": true,
+      "reduced_motion_enabled": false,
+      "timezone_offset_minutes": 0,
+      "viewport_width": 1280,
+      "viewport_height": 720
+    },
+    "session_continuity": {
+      "session_age_ms": 500,
+      "prior_interaction_count": 0,
+      "focus_blur_count": 0,
+      "navigation_count": 0,
+      "same_device_session_count": 0
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 1,
+      "typing_summary": {
+        "delete_key_count": 0,
+        "input_event_count": 2,
+        "last_input_to_submit_ms": 15,
+        "max_inter_key_interval_ms": 14,
+        "min_inter_key_interval_ms": 10,
+        "tracked_field_count": 1
+      }
+    }
+  },
+  "signals": [
+    {
+      "reason_code": "uniform_typing_cadence",
+      "severity": "high",
+      "confidence": 0.9,
+      "contribution_target": "automation",
+      "category": "typing_cadence",
+      "explanation": "Derived cadence metrics show near-zero interval variance."
+    },
+    {
+      "reason_code": "paste_or_instant_input",
+      "severity": "high",
+      "confidence": 0.82,
+      "contribution_target": "automation",
+      "category": "input_method",
+      "explanation": "Derived timing metrics show immediate populated input."
+    },
+    {
+      "reason_code": "automation_environment_hint",
+      "severity": "medium",
+      "confidence": 0.76,
+      "contribution_target": "automation",
+      "category": "environment",
+      "explanation": "Browser environment aggregates indicate automation tooling."
+    }
+  ]
+}

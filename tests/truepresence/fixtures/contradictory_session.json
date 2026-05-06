@@ -1,0 +1,108 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_contradictory",
+    "tenant_id": "default",
+    "typing": {
+      "mean_inter_key_interval_ms": 190,
+      "inter_key_interval_stddev_ms": 76,
+      "characters_per_minute": 182,
+      "correction_count": 2,
+      "correction_rate": 0.04,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 420,
+      "prompt_render_to_first_input_ms": 1180,
+      "typing_duration_ms": 4100,
+      "last_input_to_submit_ms": 260
+    },
+    "challenge": {
+      "challenge_type": "typing_cadence",
+      "response_latency_ms": 3700,
+      "expected_reading_time_ms": 1550,
+      "prompt_render_to_first_input_ms": 1180,
+      "correction_count": 2,
+      "paste_count": 0,
+      "typing_duration_ms": 4100,
+      "submitted_exactly": false
+    },
+    "pointer": {
+      "pointer_entropy": 0.7,
+      "pointer_movement_count": 58,
+      "click_count": 4,
+      "click_hesitation_ms": 230,
+      "scroll_cadence_score": 0.6
+    },
+    "environment": {
+      "webdriver_detected": false,
+      "automation_framework_hint": false,
+      "headless_browser_hint": false,
+      "reduced_motion_enabled": false,
+      "timezone_offset_minutes": -420,
+      "viewport_width": 1440,
+      "viewport_height": 900
+    },
+    "session_continuity": {
+      "session_age_ms": 21000,
+      "prior_interaction_count": 5,
+      "focus_blur_count": 2,
+      "navigation_count": 1,
+      "same_device_session_count": 3
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 2,
+      "typing_summary": {
+        "delete_key_count": 2,
+        "input_event_count": 31,
+        "last_input_to_submit_ms": 260,
+        "max_inter_key_interval_ms": 390,
+        "min_inter_key_interval_ms": 100,
+        "tracked_field_count": 2
+      }
+    }
+  },
+  "signals": [
+    {
+      "reason_code": "uniform_typing_cadence",
+      "severity": "high",
+      "confidence": 0.9,
+      "contribution_target": "automation",
+      "category": "typing_cadence",
+      "explanation": "Independent aggregate signal indicates unusually uniform cadence."
+    },
+    {
+      "reason_code": "paste_or_instant_input",
+      "severity": "high",
+      "confidence": 0.82,
+      "contribution_target": "automation",
+      "category": "input_method",
+      "explanation": "Independent aggregate signal indicates immediate input population."
+    },
+    {
+      "reason_code": "implausible_read_response_time",
+      "severity": "high",
+      "confidence": 0.86,
+      "contribution_target": "agentic_control",
+      "category": "agentic_behavior",
+      "explanation": "Timing signal indicates response faster than the expected read-and-respond window."
+    },
+    {
+      "reason_code": "human_cadence_variability",
+      "severity": "high",
+      "confidence": 0.95,
+      "contribution_target": "human_presence",
+      "category": "timing_plausibility",
+      "explanation": "Derived cadence metrics also contain strong human-like variation."
+    },
+    {
+      "reason_code": "human_pointer_variability",
+      "severity": "medium",
+      "confidence": 0.78,
+      "contribution_target": "human_presence",
+      "category": "pointer_behavior",
+      "explanation": "Derived pointer metrics contain natural hesitation and entropy."
+    }
+  ]
+}
