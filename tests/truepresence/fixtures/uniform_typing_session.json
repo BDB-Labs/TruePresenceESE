@@ -1,0 +1,71 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_uniform_typing",
+    "tenant_id": "default",
+    "typing": {
+      "mean_inter_key_interval_ms": 95,
+      "inter_key_interval_stddev_ms": 0,
+      "characters_per_minute": 380,
+      "correction_count": 0,
+      "correction_rate": 0,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 85,
+      "prompt_render_to_first_input_ms": 110,
+      "typing_duration_ms": 1900,
+      "last_input_to_submit_ms": 12
+    },
+    "challenge": {
+      "challenge_type": "typing_cadence",
+      "response_latency_ms": 2100,
+      "expected_reading_time_ms": 1200,
+      "prompt_render_to_first_input_ms": 110,
+      "correction_count": 0,
+      "paste_count": 0,
+      "typing_duration_ms": 1900,
+      "submitted_exactly": true
+    },
+    "pointer": {
+      "pointer_entropy": 0.12,
+      "pointer_movement_count": 2,
+      "click_count": 1,
+      "click_hesitation_ms": 20,
+      "scroll_cadence_score": 0.05
+    },
+    "environment": {
+      "webdriver_detected": false,
+      "automation_framework_hint": false,
+      "headless_browser_hint": false,
+      "reduced_motion_enabled": false,
+      "timezone_offset_minutes": 0,
+      "viewport_width": 1366,
+      "viewport_height": 768
+    },
+    "session_continuity": {
+      "session_age_ms": 3100,
+      "prior_interaction_count": 1,
+      "focus_blur_count": 0,
+      "navigation_count": 0,
+      "same_device_session_count": 1
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 1,
+      "typing_summary": {
+        "delete_key_count": 0,
+        "input_event_count": 18,
+        "last_input_to_submit_ms": 12,
+        "max_inter_key_interval_ms": 96,
+        "min_inter_key_interval_ms": 94,
+        "tracked_field_count": 1
+      }
+    }
+  },
+  "signals": [],
+  "_meta": {
+    "expected_category": "automation",
+    "description": "Perfectly uniform IKI stddev=0. uniform_typing_cadence detector must fire at high severity."
+  }
+}

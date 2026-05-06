@@ -1,0 +1,83 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_playwright_like",
+    "tenant_id": "default",
+    "typing": {
+      "mean_inter_key_interval_ms": 50,
+      "inter_key_interval_stddev_ms": 3,
+      "characters_per_minute": 720,
+      "correction_count": 0,
+      "correction_rate": 0,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 18,
+      "prompt_render_to_first_input_ms": 22,
+      "typing_duration_ms": 320,
+      "last_input_to_submit_ms": 10
+    },
+    "challenge": {
+      "challenge_type": "typing_cadence",
+      "response_latency_ms": 380,
+      "expected_reading_time_ms": 1600,
+      "prompt_render_to_first_input_ms": 22,
+      "correction_count": 0,
+      "paste_count": 0,
+      "typing_duration_ms": 320,
+      "submitted_exactly": true
+    },
+    "pointer": {
+      "pointer_entropy": 0.02,
+      "pointer_movement_count": 1,
+      "click_count": 1,
+      "click_hesitation_ms": 2,
+      "scroll_cadence_score": 0.01
+    },
+    "environment": {
+      "webdriver_detected": false,
+      "automation_framework_hint": true,
+      "headless_browser_hint": false,
+      "reduced_motion_enabled": true,
+      "timezone_offset_minutes": 0,
+      "viewport_width": 1280,
+      "viewport_height": 720
+    },
+    "agentic": {
+      "action_burst_count": 5,
+      "mean_burst_interval_ms": 2800,
+      "burst_interval_stddev_ms": 120,
+      "idle_to_action_latency_ms": 90,
+      "exploratory_action_count": 0,
+      "route_directness_score": 0.98,
+      "large_instant_delta_count": 2,
+      "submit_after_instant_input_ms": 180,
+      "structured_retry_count": 3,
+      "validation_repair_count": 2
+    },
+    "session_continuity": {
+      "session_age_ms": 1100,
+      "prior_interaction_count": 0,
+      "focus_blur_count": 0,
+      "navigation_count": 0,
+      "same_device_session_count": 0
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 1,
+      "typing_summary": {
+        "delete_key_count": 0,
+        "input_event_count": 6,
+        "last_input_to_submit_ms": 10,
+        "max_inter_key_interval_ms": 54,
+        "min_inter_key_interval_ms": 46,
+        "tracked_field_count": 1
+      }
+    }
+  },
+  "signals": [],
+  "_meta": {
+    "expected_category": "agentic_control",
+    "description": "Playwright-style browser automation: near-zero IKI variance, no pointer exploration, structured burst/pause loop, low idle latency, high route directness."
+  }
+}

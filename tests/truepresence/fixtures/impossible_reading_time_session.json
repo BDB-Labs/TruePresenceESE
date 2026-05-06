@@ -1,0 +1,71 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_impossible_reading",
+    "tenant_id": "default",
+    "typing": {
+      "mean_inter_key_interval_ms": 155,
+      "inter_key_interval_stddev_ms": 68,
+      "characters_per_minute": 210,
+      "correction_count": 2,
+      "correction_rate": 0.03,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 820,
+      "prompt_render_to_first_input_ms": 220,
+      "typing_duration_ms": 3400,
+      "last_input_to_submit_ms": 310
+    },
+    "challenge": {
+      "challenge_type": "reading_comprehension",
+      "response_latency_ms": 90,
+      "expected_reading_time_ms": 4800,
+      "prompt_render_to_first_input_ms": 220,
+      "correction_count": 2,
+      "paste_count": 0,
+      "typing_duration_ms": 3400,
+      "submitted_exactly": false
+    },
+    "pointer": {
+      "pointer_entropy": 0.55,
+      "pointer_movement_count": 28,
+      "click_count": 2,
+      "click_hesitation_ms": 140,
+      "scroll_cadence_score": 0.44
+    },
+    "environment": {
+      "webdriver_detected": false,
+      "automation_framework_hint": false,
+      "headless_browser_hint": false,
+      "reduced_motion_enabled": false,
+      "timezone_offset_minutes": -480,
+      "viewport_width": 1920,
+      "viewport_height": 1080
+    },
+    "session_continuity": {
+      "session_age_ms": 9400,
+      "prior_interaction_count": 2,
+      "focus_blur_count": 1,
+      "navigation_count": 0,
+      "same_device_session_count": 2
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 2,
+      "typing_summary": {
+        "delete_key_count": 2,
+        "input_event_count": 26,
+        "last_input_to_submit_ms": 310,
+        "max_inter_key_interval_ms": 350,
+        "min_inter_key_interval_ms": 88,
+        "tracked_field_count": 2
+      }
+    }
+  },
+  "signals": [],
+  "_meta": {
+    "expected_category": "agentic_control",
+    "description": "Response latency 90ms vs expected reading time 4800ms. implausible_read_response_time must fire at high severity."
+  }
+}
