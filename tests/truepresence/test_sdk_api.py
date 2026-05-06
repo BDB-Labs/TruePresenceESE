@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from truepresence.api.server import app as rest_app
+from truepresence.evidence.sdk_artifacts import sdk_evidence_store
 
 
 def _client() -> TestClient:
@@ -129,6 +130,43 @@ def test_evaluate_interaction_response_does_not_include_raw_content() -> None:
     assert "typed_text" not in body
     assert "raw_text" not in body
     assert "value" not in body
+
+
+def test_dashboard_evidence_cards_endpoint_returns_minimized_sdk_fields() -> None:
+    sdk_evidence_store.clear()
+    client = _client()
+    evaluation = client.post("/api/v1/truepresence/evaluate-interaction", json=_valid_payload())
+    assert evaluation.status_code == 200
+
+    response = client.get("/api/v1/truepresence/evidence/cards?tenant=default")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    card = payload["evidence_cards"][0]
+    assert {
+        "surface",
+        "risk_level",
+        "human_presence_likelihood",
+        "automation_likelihood",
+        "agentic_control_likelihood",
+        "confidence",
+        "reason_codes",
+        "evidence_packet_id",
+        "decision_id",
+        "recommended_action",
+        "timestamp",
+    }.issubset(card)
+    assert card["surface"] == "web"
+    assert card["evidence_packet_id"] == evaluation.json()["evidence_packet_id"]
+
+    body = json.dumps(payload)
+    assert "feature_summaries" not in body
+    assert "detector_signals" not in body
+    assert "typed_text" not in body
+    assert "message_text" not in body
+    assert "caption" not in body
+    assert "file_url" not in body
 
 
 # ---------------------------------------------------------------------------

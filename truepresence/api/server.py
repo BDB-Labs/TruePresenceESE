@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -67,6 +67,36 @@ def _safe_validation_errors(exc: ValidationError) -> list[dict[str, Any]]:
         }
         for error in exc.errors()
     ]
+
+
+def _dashboard_risk_level(likelihoods: dict[str, float]) -> str:
+    risk_score = max(
+        float(likelihoods.get("automation_likelihood") or 0.0),
+        float(likelihoods.get("agentic_control_likelihood") or 0.0),
+    )
+    if risk_score >= 0.75:
+        return "high"
+    if risk_score >= 0.5:
+        return "medium"
+    return "low"
+
+
+def _sdk_dashboard_evidence_card(artifact) -> dict[str, Any]:
+    likelihoods = dict(artifact.likelihoods)
+    return {
+        "event_type": "web_sdk",
+        "surface": artifact.surface,
+        "risk_level": _dashboard_risk_level(likelihoods),
+        "human_presence_likelihood": likelihoods.get("human_presence_likelihood"),
+        "automation_likelihood": likelihoods.get("automation_likelihood"),
+        "agentic_control_likelihood": likelihoods.get("agentic_control_likelihood"),
+        "confidence": artifact.confidence,
+        "reason_codes": list(artifact.reason_codes),
+        "evidence_packet_id": artifact.evidence_packet_id,
+        "decision_id": artifact.scoring_metadata.get("decision_id"),
+        "recommended_action": artifact.recommended_action,
+        "timestamp": artifact.created_at,
+    }
 
 
 # Exception handlers - CRITICAL: System does NOT fail silently
@@ -299,6 +329,22 @@ async def evaluate_interaction(request: Request):
         raise HTTPException(status_code=422, detail=_safe_validation_errors(exc)) from exc
 
     return evaluate_interaction_request(evaluation_request)
+
+
+@app.get("/v1/truepresence/evidence/cards")
+def list_sdk_dashboard_evidence_cards(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=50),
+):
+    """List content-minimized SDK evidence cards for the dashboard."""
+    tenant_id = (
+        request.query_params.get("tenant_id")
+        or request.query_params.get("tenant")
+        or None
+    )
+    artifacts = sdk_evidence_store.list_recent(tenant_id=tenant_id, limit=limit)
+    cards = [_sdk_dashboard_evidence_card(artifact) for artifact in artifacts]
+    return {"tenant_id": tenant_id, "count": len(cards), "evidence_cards": cards}
 
 
 @app.get("/v1/truepresence/evidence/{evidence_packet_id}")

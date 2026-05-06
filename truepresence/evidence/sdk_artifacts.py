@@ -46,6 +46,14 @@ class SdkEvidenceArtifactStore(Protocol):
     def get(self, evidence_packet_id: str) -> SdkEvidenceArtifact | None:
         ...
 
+    def list_recent(
+        self,
+        *,
+        tenant_id: str | None = None,
+        limit: int = 10,
+    ) -> list[SdkEvidenceArtifact]:
+        ...
+
 
 class InMemorySdkEvidenceArtifactStore:
     """Process-local artifact store for tests and non-DB deployments."""
@@ -61,6 +69,23 @@ class InMemorySdkEvidenceArtifactStore:
     def get(self, evidence_packet_id: str) -> SdkEvidenceArtifact | None:
         with self._lock:
             return self._artifacts.get(evidence_packet_id)
+
+    def list_recent(
+        self,
+        *,
+        tenant_id: str | None = None,
+        limit: int = 10,
+    ) -> list[SdkEvidenceArtifact]:
+        with self._lock:
+            artifacts = list(self._artifacts.values())
+        if tenant_id:
+            artifacts = [
+                artifact
+                for artifact in artifacts
+                if artifact.tenant_id == tenant_id
+            ]
+        artifacts.sort(key=lambda artifact: artifact.created_at, reverse=True)
+        return artifacts[:limit]
 
     def clear(self) -> None:
         with self._lock:
