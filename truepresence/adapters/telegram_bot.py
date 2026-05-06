@@ -32,6 +32,9 @@ from truepresence.core.runtime import (
 from truepresence.db import get_db
 from truepresence.exceptions import TruePresenceError
 from truepresence.surfaces.telegram.adapter import TelegramGuardAdapter
+from truepresence.surfaces.telegram.community import (
+    build_telegram_community_evidence_card,
+)
 from truepresence.utils.encryption import decrypt_value, encrypt_value
 
 
@@ -414,6 +417,46 @@ class TelegramProtectionService:
             return action
 
         return action
+
+    def _telegram_community_from_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        context = event.get("context", {}) if isinstance(event, dict) else {}
+        community = context.get("telegram_community", {}) if isinstance(context, dict) else {}
+        return community if isinstance(community, dict) else {}
+
+    def _community_risk_score(self, community: Dict[str, Any]) -> float:
+        detector_signals = community.get("detector_signals", [])
+        if not isinstance(detector_signals, list):
+            return 0.0
+        score = 0.0
+        for signal in detector_signals:
+            if not isinstance(signal, dict):
+                continue
+            try:
+                score = max(score, float(signal.get("confidence") or 0.0))
+            except (TypeError, ValueError):
+                continue
+        return score
+
+    def _apply_telegram_community_recommendation(
+        self,
+        action: Dict[str, Any],
+        event: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        community = self._telegram_community_from_event(event)
+        reason_codes = list(community.get("reason_codes", []))
+        risk_score = self._community_risk_score(community)
+        if not reason_codes or risk_score < 0.65:
+            return action
+
+        action["community_reason_codes"] = reason_codes
+        action["confidence"] = max(float(action.get("confidence") or 0.0), risk_score)
+        action["threat_categories"] = list(
+            dict.fromkeys([*action.get("threat_categories", []), *reason_codes])
+        )
+        if action.get("action") == "allow":
+            action["action"] = "alert_admin"
+            action["reason"] = "Telegram community behavior review: " + ", ".join(reason_codes[:3])
+        return action
     
     async def _execute_action(self, action: Dict[str, Any], update: Dict[str, Any], tenant_id: str, decision_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -572,6 +615,7 @@ class TelegramProtectionService:
             # Convert to Telegram action
             action_obj = guard_adapter.enforce(decision_result.decision)
             action = action_obj.model_dump()
+            action = self._apply_telegram_community_recommendation(action, event)
             action = self._apply_enforcement_mode(action, tenant_id)
             
             logger.info(f"[{tenant_id}] Decision: {action['action']} (confidence: {action.get('confidence', 0):.2f})")
@@ -582,6 +626,11 @@ class TelegramProtectionService:
                 "risk_factors": result_dict["final"].get("risk_factors", []),
                 "reason_codes": result_dict["final"].get("reason_codes", []),
             }
+            action["evidence_card"] = build_telegram_community_evidence_card(
+                event=event,
+                action=action,
+                evaluation=result_dict,
+            )
 
             # EXECUTE the action - This makes the bot the terminating process
             execution_outcome = await self._execute_action(action, update, tenant_id, result_dict)
@@ -965,10 +1014,25 @@ class TelegramProtectionService:
         try:
             # Create review data
             source_message = update.get("message") or update.get("edited_message") or {}
+            evidence_card = action.get("evidence_card") or build_telegram_community_evidence_card(
+                event={
+                    "event_type": "message",
+                    "timestamp": source_message.get("date"),
+                    "context": {
+                        "platform": "telegram",
+                        "user_id": source_message.get("from", {}).get("id"),
+                        "group_id": source_message.get("chat", {}).get("id"),
+                        "telegram_community": {},
+                    },
+                },
+                action=action,
+                evaluation=result,
+            )
             review_data = {
                 "action": action,
                 "update": update,
                 "evaluation": result,
+                "evidence_card": evidence_card,
                 "user_info": source_message.get("from", {}),
                 "chat_info": source_message.get("chat", {}),
                 "message_text": source_message.get("text", ""),
@@ -1014,7 +1078,7 @@ class TelegramProtectionService:
                 f"🏢 Tenant: {tenant_id}\n"
                 f"👤 User: {html.escape(str(user_info.get('username', 'N/A')))} (ID: {user_info.get('id', 'N/A')})\n"
                 f"💬 Chat: {html.escape(str(chat_info.get('title', 'Private')))} (ID: {chat_info.get('id', 'N/A')})\n"
-                f"📱 Message: {html.escape(str(review_data['message_text'])[:100])}...\n"
+                f"🧾 Evidence: metadata-only behavior card, no content preview\n"
                 f"⚠️  Threats: {', '.join(review_data['threat_categories'])}\n"
                 f"🔍 Confidence: {review_data['action'].get('confidence', 0):.2f}"
                 f"{review_link}"

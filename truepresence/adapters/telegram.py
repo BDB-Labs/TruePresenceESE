@@ -8,13 +8,16 @@ Includes detection for: Mirrors/Userbots, Crypto Miners, DMCA, Torrents, VNC, Il
 import logging
 import math
 import re
+import statistics
 import time
 from collections import defaultdict, deque
 from typing import Any, Dict, Optional
 
 from truepresence.adapters.telegram_models import TelegramAction, TelegramEvent
 from truepresence.db import get_db
+from truepresence.detectors.telegram_community import run_telegram_community_detectors
 from truepresence.exceptions import EvidenceError
+from truepresence.surfaces.telegram.community import TelegramCommunityFeatures
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +123,15 @@ class TelegramAdapter:
         # user_id -> deque of recent message texts
         self._user_recent_texts: Dict[str, deque] = defaultdict(lambda: deque(maxlen=10))
 
+        # Metadata-only Telegram community behavior state.
+        self._user_chat_join_times: Dict[tuple[str, str], float] = {}
+        self._user_chat_first_message_ms: Dict[tuple[str, str], float] = {}
+        self._user_chat_first_media_ms: Dict[tuple[str, str], float] = {}
+        self._user_chat_first_link_ms: Dict[tuple[str, str], float] = {}
+        self._chat_join_times: Dict[str, deque] = defaultdict(lambda: deque(maxlen=250))
+        self._chat_message_times: Dict[str, deque] = defaultdict(lambda: deque(maxlen=250))
+        self._user_joined_groups: Dict[str, deque] = defaultdict(lambda: deque(maxlen=50))
+
         # Apply tenant-specific configuration
         self._configure_detectors()
 
@@ -222,6 +234,19 @@ class TelegramAdapter:
 
         # Extract scores safely from threat_analysis
         scores = threat_analysis.get("scores", {})
+        community_features = self._build_community_features_for_message(
+            user_id=user_id,
+            chat_id=str(chat.get("id", "unknown")),
+            timestamp=msg_timestamp,
+            message=message,
+        )
+        community_signals = run_telegram_community_detectors(community_features)
+        community = self._community_context(community_features, community_signals)
+        community_feature_scores = self._community_feature_scores(community_features)
+        community_signal_scores = {
+            f"telegram_community_{signal.reason_code}": signal.confidence
+            for signal in community_signals
+        }
 
         return {
             "event_type": "message",
@@ -245,6 +270,7 @@ class TelegramAdapter:
                 # Behavioral signals — now actually calculated
                 "message_velocity": message_velocity,
                 "content_similarity": content_similarity,
+                **community_feature_scores,
             },
             "signals": {
                 # Signals for the role pipeline
@@ -256,6 +282,7 @@ class TelegramAdapter:
                 "copyright_indicators": scores.get("copyright_violation", 0.0),
                 "illegal_indicators": scores.get("illegal_content", 0.0),
                 "mirrored_content_score": scores.get("mirrored_content", 0.0),
+                **community_signal_scores,
             },
             "context": {
                 "platform": "telegram",
@@ -263,6 +290,7 @@ class TelegramAdapter:
                 "username": from_user.get("username", ""),
                 "is_bot": from_user.get("is_bot", False),
                 "group_id": chat.get("id"),
+                "telegram_community": community,
             },
             "threat_analysis": threat_analysis
         }
@@ -331,6 +359,14 @@ class TelegramAdapter:
             "kicked": "member_banned",
             "restricted": "member_restricted",
         }.get(new_status, "member_update")
+        user_id = str(user.get("id", "unknown"))
+        chat_id = str(chat.get("id", "unknown"))
+        timestamp = float(chat_member.get("date", 0) or time.time())
+        if event_type == "member_join":
+            self._record_join_metadata(user_id, chat_id, timestamp)
+        community_features = self._build_community_features_for_member(user_id, chat_id, timestamp)
+        community_signals = run_telegram_community_detectors(community_features)
+        community = self._community_context(community_features, community_signals)
         
         return {
             "event_type": event_type,
@@ -350,6 +386,19 @@ class TelegramAdapter:
                 "copyright_indicators": 0.0,
                 "illegal_indicators": 0.0,
                 "mirrored_content_score": 0.0,
+                **self._community_feature_scores(community_features),
+            },
+            "signals": {
+                "torrent_indicators": 0.0,
+                "crypto_mining_indicators": 0.0,
+                "vnc_indicators": 0.0,
+                "copyright_indicators": 0.0,
+                "illegal_indicators": 0.0,
+                "mirrored_content_score": 0.0,
+                **{
+                    f"telegram_community_{signal.reason_code}": signal.confidence
+                    for signal in community_signals
+                },
             },
             "context": {
                 "platform": "telegram",
@@ -358,7 +407,8 @@ class TelegramAdapter:
                 "first_name": user.get("first_name", ""),
                 "is_bot": user.get("is_bot", False),
                 "group_id": chat.get("id"),
-                "group_title": chat.get("title", "")
+                "group_title": chat.get("title", ""),
+                "telegram_community": community,
             },
             "threat_analysis": {
                 "threats_detected": []
@@ -434,6 +484,190 @@ class TelegramAdapter:
         while recent and recent[0] < cutoff:
             recent.popleft()
         return round(len(recent), 3)
+
+    def _record_join_metadata(self, user_id: str, chat_id: str, timestamp: float) -> None:
+        key = (user_id, chat_id)
+        self._user_chat_join_times[key] = timestamp
+        self._user_chat_first_message_ms.pop(key, None)
+        self._user_chat_first_media_ms.pop(key, None)
+        self._user_chat_first_link_ms.pop(key, None)
+
+        chat_joins = self._chat_join_times[chat_id]
+        chat_joins.append(timestamp)
+        cutoff = timestamp - 60
+        while chat_joins and chat_joins[0] < cutoff:
+            chat_joins.popleft()
+
+        joined_groups = self._user_joined_groups[user_id]
+        if chat_id not in joined_groups:
+            joined_groups.append(chat_id)
+
+    def _build_community_features_for_member(
+        self,
+        user_id: str,
+        chat_id: str,
+        timestamp: float,
+    ) -> TelegramCommunityFeatures:
+        return TelegramCommunityFeatures(
+            joined_within_cluster_count=self._joined_within_cluster_count(chat_id, timestamp),
+            group_hop_count=len(set(self._user_joined_groups.get(user_id, []))),
+            link_present=False,
+            media_present=False,
+        )
+
+    def _build_community_features_for_message(
+        self,
+        *,
+        user_id: str,
+        chat_id: str,
+        timestamp: float,
+        message: Dict[str, Any],
+    ) -> TelegramCommunityFeatures:
+        link_present = self._message_has_link_entity(message)
+        media_present = self._message_has_media(message)
+        key = (user_id, chat_id)
+        join_time = self._user_chat_join_times.get(key)
+
+        join_to_first_message_ms = self._first_action_latency_ms(
+            store=self._user_chat_first_message_ms,
+            key=key,
+            join_time=join_time,
+            timestamp=timestamp,
+            condition=True,
+        )
+        join_to_first_media_ms = self._first_action_latency_ms(
+            store=self._user_chat_first_media_ms,
+            key=key,
+            join_time=join_time,
+            timestamp=timestamp,
+            condition=media_present,
+        )
+        join_to_first_link_ms = self._first_action_latency_ms(
+            store=self._user_chat_first_link_ms,
+            key=key,
+            join_time=join_time,
+            timestamp=timestamp,
+            condition=link_present,
+        )
+        interval_summary = self._message_interval_summary(user_id)
+        synchronized_peer_count = self._synchronized_peer_count(chat_id, user_id, timestamp)
+        self._record_message_cluster(chat_id, user_id, timestamp)
+
+        return TelegramCommunityFeatures(
+            join_to_first_message_ms=join_to_first_message_ms,
+            join_to_first_media_ms=join_to_first_media_ms,
+            join_to_first_link_ms=join_to_first_link_ms,
+            message_count_window=interval_summary["message_count_window"],
+            burst_count=interval_summary["burst_count"],
+            mean_message_interval_ms=interval_summary["mean_message_interval_ms"],
+            message_interval_stddev_ms=interval_summary["message_interval_stddev_ms"],
+            joined_within_cluster_count=self._joined_within_cluster_count(chat_id, timestamp),
+            synchronized_peer_count=synchronized_peer_count,
+            group_hop_count=len(set(self._user_joined_groups.get(user_id, []))),
+            link_present=link_present,
+            media_present=media_present,
+        )
+
+    def _first_action_latency_ms(
+        self,
+        *,
+        store: Dict[tuple[str, str], float],
+        key: tuple[str, str],
+        join_time: float | None,
+        timestamp: float,
+        condition: bool,
+    ) -> float | None:
+        if not condition or join_time is None:
+            return store.get(key)
+        if key not in store:
+            store[key] = max(0.0, (float(timestamp) - float(join_time)) * 1000)
+        return store[key]
+
+    def _message_interval_summary(self, user_id: str) -> Dict[str, int | float | None]:
+        recent = list(self._user_message_times.get(user_id, []))
+        intervals = [
+            max(0.0, (right - left) * 1000)
+            for left, right in zip(recent, recent[1:], strict=False)
+        ]
+        if not intervals:
+            return {
+                "message_count_window": len(recent),
+                "burst_count": 0,
+                "mean_message_interval_ms": None,
+                "message_interval_stddev_ms": None,
+            }
+        return {
+            "message_count_window": len(recent),
+            "burst_count": sum(1 for interval in intervals if interval <= 2_000),
+            "mean_message_interval_ms": round(sum(intervals) / len(intervals), 3),
+            "message_interval_stddev_ms": round(statistics.pstdev(intervals), 3)
+            if len(intervals) > 1
+            else 0.0,
+        }
+
+    def _joined_within_cluster_count(self, chat_id: str, timestamp: float) -> int:
+        recent = self._chat_join_times.get(chat_id)
+        if not recent:
+            return 0
+        cutoff = float(timestamp) - 60
+        while recent and recent[0] < cutoff:
+            recent.popleft()
+        return len(recent)
+
+    def _synchronized_peer_count(self, chat_id: str, user_id: str, timestamp: float) -> int:
+        recent = self._chat_message_times[chat_id]
+        cutoff = float(timestamp) - 3
+        while recent and recent[0][0] < cutoff:
+            recent.popleft()
+        return len({peer_id for _, peer_id in recent if peer_id != user_id})
+
+    def _record_message_cluster(self, chat_id: str, user_id: str, timestamp: float) -> None:
+        recent = self._chat_message_times[chat_id]
+        recent.append((float(timestamp), user_id))
+        cutoff = float(timestamp) - 60
+        while recent and recent[0][0] < cutoff:
+            recent.popleft()
+
+    def _message_has_link_entity(self, message: Dict[str, Any]) -> bool:
+        for key in ("entities", "caption_entities"):
+            entities = message.get(key) or []
+            for entity in entities:
+                if isinstance(entity, dict) and entity.get("type") in {"url", "text_link"}:
+                    return True
+        return False
+
+    def _message_has_media(self, message: Dict[str, Any]) -> bool:
+        media_keys = {
+            "photo",
+            "video",
+            "document",
+            "animation",
+            "audio",
+            "voice",
+            "video_note",
+            "sticker",
+        }
+        return any(bool(message.get(key)) for key in media_keys)
+
+    def _community_context(
+        self,
+        features: TelegramCommunityFeatures,
+        signals,
+    ) -> Dict[str, Any]:
+        return {
+            "features": features.model_dump(exclude_none=True),
+            "reason_codes": [signal.reason_code for signal in signals],
+            "detector_signals": [signal.model_dump() for signal in signals],
+        }
+
+    def _community_feature_scores(self, features: TelegramCommunityFeatures) -> Dict[str, float]:
+        scores: Dict[str, float] = {}
+        for key, value in features.model_dump(exclude_none=True).items():
+            if isinstance(value, bool):
+                scores[f"telegram_community_{key}"] = 1.0 if value else 0.0
+            elif isinstance(value, (int, float)):
+                scores[f"telegram_community_{key}"] = float(value)
+        return scores
     
     def _get_warning_count(self, user_id: int) -> int:
         """Get number of previous warnings for this user from database."""
