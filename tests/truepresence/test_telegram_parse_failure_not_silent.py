@@ -1,7 +1,10 @@
 import pytest
 
-from truepresence.adapters.telegram import TelegramAdapter
-from truepresence.exceptions import EvidenceError
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.db, pytest.mark.telegram]
+
+from truepresence.adapters.telegram import TelegramAdapter  # noqa: E402
+from truepresence.exceptions import EvidenceError  # noqa: E402
 
 
 def test_telegram_parse_failure_raises_evidence_error() -> None:

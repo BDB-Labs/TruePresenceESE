@@ -22,7 +22,6 @@ Covered requirements
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -189,7 +188,9 @@ def test_no_fixture_contains_raw_content(name: str) -> None:
     Belt-and-suspenders: read the raw JSON and assert there are no keys that
     match the global raw-content denylist regardless of nesting.
     """
-    from truepresence.sdk.privacy import _is_raw_content_key  # type: ignore[attr-defined]
+    from truepresence.sdk.privacy import (
+        _is_raw_content_key,  # type: ignore[attr-defined]
+    )
 
     path = FIXTURE_DIR / f"{name}.json"
     raw = json.loads(path.read_text(encoding="utf-8"))

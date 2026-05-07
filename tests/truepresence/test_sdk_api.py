@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from truepresence.api.server import app as rest_app
 from truepresence.evidence.sdk_artifacts import sdk_evidence_store
+
+pytestmark = pytest.mark.sdk
 
 
 def _client() -> TestClient:

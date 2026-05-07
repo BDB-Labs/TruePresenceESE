@@ -36,6 +36,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+test = [
+  "pytest>=9.0.3",
+]
 dev = [
   "pytest>=9.0.3",
   "ruff>=0.15.11",
@@ -54,6 +57,14 @@ include = ["truepresence*", "ese*", "ese_core*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "sdk: focused TruePresence SDK, privacy, and scoring unit tests",
+  "browser_sdk: browser JavaScript SDK tests run with node --test",
+  "integration: optional integration or deployment contract tests",
+  "db: tests that import or exercise PostgreSQL-backed components",
+  "rate_limit: tests that import FastAPI rate-limit wiring",
+  "telegram: Telegram adapter, bot, community, and safety guardrail tests",
+]
 
 [tool.ruff]
 target-version = "py310"

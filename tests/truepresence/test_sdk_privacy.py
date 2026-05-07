@@ -19,6 +19,8 @@ import pytest
 
 from truepresence.sdk.privacy import RawContentRejected, ensure_privacy_safe_payload
 
+pytestmark = pytest.mark.sdk
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

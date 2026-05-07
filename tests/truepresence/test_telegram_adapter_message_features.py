@@ -1,4 +1,9 @@
-from truepresence.adapters.telegram import TelegramAdapter
+import pytest
+
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.db, pytest.mark.telegram]
+
+from truepresence.adapters.telegram import TelegramAdapter  # noqa: E402
 
 
 def test_parse_message_populates_velocity_and_single_history_append() -> None:

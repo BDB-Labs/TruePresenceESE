@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies with test extras
-        run: uv pip install -e ".[dev]"
+        run: uv pip install -e ".[dev,test]"
 
       - name: Run tests
         run: uv run pytest tests/ -v

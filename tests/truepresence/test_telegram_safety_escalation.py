@@ -1,9 +1,14 @@
 import asyncio
 import json
 
-from truepresence.adapters.telegram import TelegramAdapter
-from truepresence.adapters.telegram_bot import TelegramProtectionService
-from truepresence.safety.escalation import (
+import pytest
+
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.db, pytest.mark.telegram]
+
+from truepresence.adapters.telegram import TelegramAdapter  # noqa: E402
+from truepresence.adapters.telegram_bot import TelegramProtectionService  # noqa: E402
+from truepresence.safety.escalation import (  # noqa: E402
     ProviderRiskSignal,
     build_telegram_safety_evidence_card,
 )

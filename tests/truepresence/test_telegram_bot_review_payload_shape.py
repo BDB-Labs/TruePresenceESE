@@ -1,6 +1,11 @@
 import asyncio
 
-from truepresence.adapters.telegram_bot import TelegramProtectionService
+import pytest
+
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.db, pytest.mark.telegram]
+
+from truepresence.adapters.telegram_bot import TelegramProtectionService  # noqa: E402
 
 
 def test_manual_review_uses_edited_message_shape() -> None:

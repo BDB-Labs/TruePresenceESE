@@ -1,7 +1,11 @@
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import truepresence.adapters.telegram_bot as telegram_bot
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.db, pytest.mark.telegram]
+
+import truepresence.adapters.telegram_bot as telegram_bot  # noqa: E402
 
 
 class _FakeService:

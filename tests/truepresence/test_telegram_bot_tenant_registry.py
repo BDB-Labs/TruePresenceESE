@@ -1,4 +1,9 @@
-from truepresence.adapters.telegram_bot import get_service_for_tenant
+import pytest
+
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.db, pytest.mark.telegram]
+
+from truepresence.adapters.telegram_bot import get_service_for_tenant  # noqa: E402
 
 
 def test_get_service_for_tenant_is_stable_per_tenant() -> None:

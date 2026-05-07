@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from truepresence.db import _build_database_url
+import pytest
+
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.db]
+
+from truepresence.db import _build_database_url  # noqa: E402
 
 
 def test_build_database_url_encodes_fallback_credentials(monkeypatch) -> None:

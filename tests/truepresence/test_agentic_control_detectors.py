@@ -9,7 +9,10 @@ from truepresence.detectors.agentic_control import (
     run_agentic_control_detectors,
     structured_retry_pattern,
 )
-from truepresence.detectors.human_plausibility import DetectorSignal, run_human_plausibility_detectors
+from truepresence.detectors.human_plausibility import (
+    DetectorSignal,
+    run_human_plausibility_detectors,
+)
 from truepresence.scoring.model import score_interaction
 from truepresence.sdk.contracts import InteractionFeaturePacket
 from truepresence.sdk.features import AgenticBehaviorFeatures, TypingCadenceFeatures

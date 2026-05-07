@@ -1,0 +1,65 @@
+name: TruePresence SDK and Browser Tests
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+jobs:
+  truepresence_checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.26"
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Sync Python test dependencies
+        run: uv sync --locked --extra dev --extra test
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: truepresence/ui/package-lock.json
+
+      - name: Install dashboard dependencies
+        working-directory: truepresence/ui
+        run: npm ci
+
+      - name: Run focused SDK tests
+        run: >
+          uv run pytest
+          tests/truepresence/test_sdk_api.py
+          tests/truepresence/test_sdk_privacy.py
+          tests/truepresence/test_sdk_scoring.py
+          -q
+
+      - name: Run Telegram guardrail tests
+        run: >
+          uv run pytest
+          tests/test_truepresence_architecture.py
+          tests/truepresence/test_telegram_*.py
+          -q
+
+      - name: Run browser SDK tests
+        run: node --test tests/browser-sdk/truepresence-browser-sdk.test.mjs
+
+      - name: Lint dashboard
+        working-directory: truepresence/ui
+        run: npm run lint
+
+      - name: Build dashboard
+        working-directory: truepresence/ui
+        run: npm run build
+
+      - name: Check whitespace
+        run: git diff --check

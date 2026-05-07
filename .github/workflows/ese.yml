@@ -20,7 +20,7 @@ jobs:
           enable-cache: true
 
       - name: Sync project
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra test
 
       - name: Lint
         run: uv run ruff check --config pyproject.toml ese tests

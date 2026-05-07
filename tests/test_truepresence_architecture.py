@@ -8,9 +8,20 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
     import tomli as tomllib
 
-from truepresence.adapters.telegram import TelegramAdapter
-from truepresence.decision.decision_object import DecisionState
-from truepresence.decision.engine import TruePresenceDecisionEngine
+import pytest
+
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytest.importorskip("slowapi", reason="requires slowapi from the test/dev install")
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.db,
+    pytest.mark.rate_limit,
+    pytest.mark.telegram,
+]
+
+from truepresence.adapters.telegram import TelegramAdapter  # noqa: E402
+from truepresence.decision.decision_object import DecisionState  # noqa: E402
+from truepresence.decision.engine import TruePresenceDecisionEngine  # noqa: E402
 
 
 def test_truepresence_console_entrypoint_is_callable() -> None:

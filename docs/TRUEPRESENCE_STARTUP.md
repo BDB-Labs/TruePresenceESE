@@ -19,7 +19,7 @@ Create and install the Python environment:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,test]"
 ```
 
 For a local smoke test without Postgres, use explicit development mode:
@@ -145,24 +145,88 @@ Do not set `TRUEPRESENCE_ALLOW_DEV_AUTH` or
 
 ## Verification
 
-Python backend:
+Install the Python and dashboard test dependencies before running the full
+local checks:
 
 ```bash
 source .venv/bin/activate
+python -m pip install -e ".[dev,test]"
+cd truepresence/ui
+npm ci
+cd ../..
+```
+
+Full Python suite:
+
+```bash
+PYTHONPATH=. pytest -q
+```
+
+Focused SDK tests:
+
+```bash
+PYTHONPATH=. pytest \
+  tests/truepresence/test_sdk_api.py \
+  tests/truepresence/test_sdk_privacy.py \
+  tests/truepresence/test_sdk_scoring.py \
+  -q
+```
+
+Optional integration and Telegram guardrail tests:
+
+```bash
+PYTHONPATH=. pytest \
+  tests/test_truepresence_architecture.py \
+  tests/truepresence/test_telegram_*.py \
+  -q
+```
+
+These tests are marked with `integration`, `db`, `rate_limit`, and `telegram`
+where applicable. Modules that import PostgreSQL-backed or rate-limit wiring
+use `pytest.importorskip`, so SDK-only runs can still execute when
+`psycopg2-binary` or `slowapi` is not installed.
+
+Browser SDK tests:
+
+```bash
+node --test tests/browser-sdk/truepresence-browser-sdk.test.mjs
+```
+
+Backend compile and lint checks:
+
+```bash
 python -m compileall -q truepresence ese main.py
-python -m pytest -q
 git ls-files '*.py' | xargs ruff check
 ```
 
-Dashboard:
+Dashboard lint and build:
 
 ```bash
 cd truepresence/ui
 npm run lint
+npm run build
+```
+
+Whitespace check:
+
+```bash
+git diff --check
 ```
 
 Note: run Ruff only on Python files. The repository also contains JavaScript,
 TypeScript, JSON, and TSX assets that Ruff will report as invalid Python.
+
+## Dependency Alert Follow-Ups
+
+Current open alerts need targeted follow-up rather than broad dependency churn:
+
+- `ecdsa` is pulled through the current Python auth dependency path and has no
+  patched release listed by Dependabot. Treat this as a follow-up to replace or
+  isolate the vulnerable dependency path.
+- The PostCSS advisory is bundled through the current Next.js dependency.
+  `npm audit` suggests an unsafe downgrade path instead of a safe patch, so
+  wait for a patched Next.js release or handle it in a dedicated dependency
+  update.
 
 ## Troubleshooting
 

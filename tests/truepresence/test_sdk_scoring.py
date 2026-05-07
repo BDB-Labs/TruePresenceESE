@@ -21,13 +21,18 @@ import pytest
 
 from truepresence.detectors.human_plausibility import DetectorSignal
 from truepresence.scoring.model import score_interaction
-from truepresence.sdk.contracts import InteractionFeaturePacket, TruePresenceEvaluationResponse
+from truepresence.sdk.contracts import (
+    InteractionFeaturePacket,
+    TruePresenceEvaluationResponse,
+)
 from truepresence.sdk.features import (
     ChallengeInteractionFeatures,
     PointerBehaviorFeatures,
     TypingCadenceFeatures,
 )
 from truepresence.sdk.privacy import ensure_privacy_safe_feature_packet
+
+pytestmark = pytest.mark.sdk
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"

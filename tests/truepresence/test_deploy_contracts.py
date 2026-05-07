@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-from truepresence.main import app
+pytest.importorskip("slowapi", reason="requires slowapi from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.rate_limit]
+
+from truepresence.main import app  # noqa: E402
 
 
 def test_render_github_actions_workflows_are_removed() -> None:

@@ -1,10 +1,15 @@
 from dataclasses import dataclass
 
-from truepresence.decision.decision_object import DecisionObject
-from truepresence.decision.engine import DecisionResult
-from truepresence.evidence.argument_graph import ArgumentGraph
-from truepresence.evidence.packet import EvidencePacket
-from truepresence.surfaces.telegram.adapter import TelegramGuardAdapter
+import pytest
+
+pytest.importorskip("psycopg2", reason="requires psycopg2-binary from the test/dev install")
+pytestmark = [pytest.mark.integration, pytest.mark.db, pytest.mark.telegram]
+
+from truepresence.decision.decision_object import DecisionObject  # noqa: E402
+from truepresence.decision.engine import DecisionResult  # noqa: E402
+from truepresence.evidence.argument_graph import ArgumentGraph  # noqa: E402
+from truepresence.evidence.packet import EvidencePacket  # noqa: E402
+from truepresence.surfaces.telegram.adapter import TelegramGuardAdapter  # noqa: E402
 
 
 @dataclass
