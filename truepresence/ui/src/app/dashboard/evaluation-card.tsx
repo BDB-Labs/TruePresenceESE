@@ -35,6 +35,19 @@ const eventLabels: Record<EvidenceEventType, string> = {
   safety: "Safety escalation",
 };
 
+const labelAcronyms = new Map([
+  ["ai", "AI"],
+  ["api", "API"],
+  ["db", "DB"],
+  ["dmca", "DMCA"],
+  ["id", "ID"],
+  ["ip", "IP"],
+  ["jwt", "JWT"],
+  ["sdk", "SDK"],
+  ["url", "URL"],
+  ["vnc", "VNC"],
+]);
+
 function formatPercent(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "n/a";
@@ -55,11 +68,29 @@ function formatTimestamp(value: string | number | null | undefined) {
   return date.toLocaleString();
 }
 
-function normalizeLabel(value: string | null | undefined, fallback = "unknown") {
+export function formatHumanLabel(value: string | null | undefined, fallback = "unknown") {
   if (!value) {
     return fallback;
   }
-  return value.replaceAll("_", " ");
+  const words = value
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean);
+  if (!words.length) {
+    return fallback;
+  }
+  return words
+    .map((word, index) => {
+      const acronym = labelAcronyms.get(word);
+      if (acronym) {
+        return acronym;
+      }
+      return index === 0 ? word[0].toUpperCase() + word.slice(1) : word;
+    })
+    .join(" ");
 }
 
 function riskBadgeClass(riskLevel: string) {
@@ -74,7 +105,7 @@ function riskBadgeClass(riskLevel: string) {
 }
 
 export function EvaluationEvidenceCard({ card }: EvaluationEvidenceCardProps) {
-  const riskLevel = normalizeLabel(card.risk_level, "unknown");
+  const riskLevel = formatHumanLabel(card.risk_level, "Unknown");
   const reasonCodes = card.reason_codes ?? [];
   const showLikelihoods = card.eventType !== "safety";
   const likelihoods = [
@@ -103,7 +134,7 @@ export function EvaluationEvidenceCard({ card }: EvaluationEvidenceCardProps) {
             {eventLabels[card.eventType]}
           </p>
           <h3 className="mt-1 break-words text-lg font-semibold text-[var(--tp-text-primary)]">
-            {normalizeLabel(card.surface, "unknown surface")}
+            {formatHumanLabel(card.surface, "Unknown surface")}
           </h3>
         </div>
         <span className={riskBadgeClass(riskLevel)}>{riskLevel}</span>
@@ -138,7 +169,7 @@ export function EvaluationEvidenceCard({ card }: EvaluationEvidenceCardProps) {
         <div>
           <dt className="text-[var(--tp-text-muted)]">Recommended action</dt>
           <dd className="mt-1 break-words font-medium text-[var(--tp-text-primary)]">
-            {normalizeLabel(card.recommended_action, "n/a")}
+            {formatHumanLabel(card.recommended_action, "n/a")}
           </dd>
         </div>
         <div>
@@ -182,8 +213,12 @@ export function EvaluationEvidenceCard({ card }: EvaluationEvidenceCardProps) {
         <div className="mt-2 flex flex-wrap gap-2">
           {reasonCodes.length ? (
             reasonCodes.map((code) => (
-              <span className="badge badge-neutral max-w-full break-words" key={code}>
-                {code}
+              <span
+                className="badge badge-neutral max-w-full break-words"
+                key={code}
+                title={code}
+              >
+                {formatHumanLabel(code, "Unknown")}
               </span>
             ))
           ) : (

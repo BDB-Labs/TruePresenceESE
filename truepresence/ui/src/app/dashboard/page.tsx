@@ -12,6 +12,7 @@ import {
 
 import {
   EvaluationEvidenceCard,
+  formatHumanLabel,
   type EvaluationEvidenceCardData,
 } from "./evaluation-card";
 
@@ -163,6 +164,14 @@ function reviewReasonCodes(
     review.risk_factors,
     review.threat_categories,
   );
+}
+
+function reviewSignalLabel(review: ReviewItem) {
+  const signals = uniqueStrings(review.risk_factors, review.threat_categories).slice(0, 3);
+  if (!signals.length) {
+    return "None";
+  }
+  return signals.map((signal) => formatHumanLabel(signal, "Unknown")).join(", ");
 }
 
 function isSafetyReview(
@@ -493,16 +502,18 @@ export default function DashboardPage() {
                       </span>
                     </td>
                     <td className="py-3 pr-4 text-[var(--tp-text-secondary)]">
-                      {review.action?.action || "review"}
+                      {formatHumanLabel(review.action?.action, "Review")}
                     </td>
                     <td className="py-3 pr-4 text-[var(--tp-text-secondary)]">
                       {formatConfidence(review.action?.confidence)}
                     </td>
                     <td className="py-3 pr-4 text-[var(--tp-text-secondary)]">
-                      {(review.risk_factors || review.threat_categories || []).slice(0, 3).join(", ") || "None"}
+                      {reviewSignalLabel(review)}
                     </td>
                     <td className="py-3 pr-4">
-                      <span className="badge badge-warning">{review.status || "pending"}</span>
+                      <span className="badge badge-warning">
+                        {formatHumanLabel(review.status, "Pending")}
+                      </span>
                     </td>
                   </tr>
                 ))}
