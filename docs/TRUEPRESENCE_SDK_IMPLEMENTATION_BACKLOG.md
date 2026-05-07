@@ -2,47 +2,80 @@
 
 ## Purpose
 
-This backlog translates the current TruePresence product direction into concrete programming work.
+This backlog tracks the SDK-first TruePresence workstreams after the SDK, scoring, Telegram, safety, and dashboard evidence-card merges. It distinguishes completed v0 work from remaining hardening and roadmap items.
 
-TruePresence is not a Telegram-only moderation product. It is an integrated SDK and evidence system for determining whether an interaction is consistent with human operation, scripted automation, or AI-agentic control.
+TruePresence remains an integrated SDK and evidence system for estimating whether an interaction is consistent with human operation, scripted automation, or AI-agentic control.
 
-The core product claim must remain probabilistic and auditable:
+The core product claim remains probabilistic and auditable:
 
 > TruePresence records how an interaction unfolds, not what a user types.
 
 ## Product Boundary
 
-TruePresence should be SDK-first and surface-agnostic.
+TruePresence is SDK-first and surface-agnostic. Telegram is one adapter. The product center is an interaction-authenticity engine that can be embedded into websites, testing sites, staging environments, and community surfaces.
 
-Telegram is one adapter. The product center is an interaction-authenticity engine that can be embedded into websites, testing sites, staging environments, and community surfaces.
+## Document Map
 
-## Implementation Workstreams
+| Document | Role |
+|---|---|
+| [README](../README.md) | Product-forward overview and quickstart |
+| [Browser SDK](TRUEPRESENCE_BROWSER_SDK.md) | Browser SDK API and integration guide |
+| [Privacy contract](TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md) | Privacy-safe payload and output semantics |
+| [Scoring model](TRUEPRESENCE_SCORING_MODEL.md) | Deterministic probabilistic scoring model |
+| [Codebase map](TRUEPRESENCE_CODEBASE_MAP.md) | Canonical package paths, modules, and entry points |
+| [Dashboard evidence](TRUEPRESENCE_DASHBOARD.md) | Privacy-safe evidence-card display rules |
+| [Roadmap](TRUEPRESENCE_ROADMAP.md) | Prioritized workstream status table |
 
-### 1. SDK Core Contracts
+## Completed V0 Work
 
-Create a public SDK contract layer.
+These items are implemented enough to serve as the current baseline. They may still have hardening items listed in the roadmap.
 
-Proposed files:
+| Workstream | Status | Evidence | Notes |
+|---|---|---|---|
+| README product positioning | Implemented v0 | [README](../README.md) | README now positions TruePresence as a privacy-preserving interaction authenticity SDK, not a Telegram-only moderation product. |
+| SDK contracts | Implemented v0 | `truepresence/sdk/contracts.py`, `truepresence/sdk/features.py` | Request and response models include likelihoods, confidence, reason codes, evidence packet IDs, recommended action, and enforcement mode. |
+| Privacy-preserving feature model v0 | Implemented v0 | `truepresence/sdk/privacy.py`, `truepresence/sdk/privacy.js`, [privacy contract](TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md) | Closed schemas and allowlists reject raw content fields before scoring. Further allowlist hardening remains. |
+| Backend evaluation endpoint | Implemented v0 | `POST /api/v1/truepresence/evaluate-interaction` in `truepresence/api/server.py` | Web/SDK evaluations run without Telegram dependencies and return SDK contract responses. |
+| Browser JavaScript SDK | Implemented v0 | `truepresence/sdk/index.js`, `tests/browser-sdk/truepresence-browser-sdk.test.mjs`, [browser SDK doc](TRUEPRESENCE_BROWSER_SDK.md) | Collects derived form, typing, pointer, and challenge summaries without transmitting raw text by default. |
+| Human plausibility detectors | Implemented v0 | `truepresence/detectors/human_plausibility.py`, `typing_cadence.py`, `reading_time.py` | Emits weak signal reason codes and confidence/severity contributions. |
+| Calibrated scoring model | Implemented v0 | `truepresence/scoring/model.py`, `truepresence/scoring/weights.py`, [scoring doc](TRUEPRESENCE_SCORING_MODEL.md) | Deterministic probabilistic scoring with category-aware aggregation, confidence, and reason codes. |
 
-- `truepresence/sdk/__init__.py`
-- `truepresence/sdk/contracts.py`
-- `truepresence/sdk/features.py`
-- `truepresence/sdk/evaluation.py`
-- `truepresence/sdk/privacy.py`
+## Remaining Roadmap Backlog
 
-Required models:
+| Workstream | Current status | Remaining work | Target branch |
+|---|---|---|---|
+| Privacy allowlist hardening | Implemented v0; needs hardening | Expand negative tests for renamed content fields, nested metadata, URLs, clipboard/path fields, and future SDK sections. Keep rejecting unsafe payloads before scoring. | `feature/privacy-allowlist-hardening` |
+| Agentic-control detectors | Implemented v0; needs hardening | Calibrate thresholds with additional Playwright/Selenium and browser-agent traces, reduce false positives for power users and accessibility tooling, and document production tuning limits. | `feature/agentic-control-detectors` |
+| Evidence artifact linkage | Implemented v0; needs durable linkage | Replace process-local SDK artifact storage with durable tenant-scoped persistence, link decision artifacts and evidence artifacts consistently, and define retention controls. | `feature/evidence-artifact-linkage` |
+| Testing harness | Implemented v0; needs broader coverage | Add scenario coverage for more surfaces, tenant policies, dashboard payloads, regression reporting, and production-like fixtures. | `feature/evaluation-harness` |
+| Challenge framework | Implemented v0 modules; API/UI incomplete | Expose challenge start/complete routes, connect challenge outputs to SDK feature packets, and ensure challenge responses remain content-minimized. | `feature/challenge-framework` |
+| Risk provider connectors | Planned; not yet implemented as provider connectors | Add third-party provider adapter contracts for bot, fraud, attestation, or lawful media-risk providers. Provider outputs should enter evidence without becoming the final authority. | `feature/risk-provider-connectors` |
+| Telegram community signals | Implemented v0; needs production hardening | Calibrate metadata-only thresholds, add tenant policy controls, and continue preventing message text, captions, raw media IDs, and previews from entering evidence cards. | `feature/telegram-community-signals` |
+| Telegram safety escalation | Implemented v0; needs operational hardening | Validate lawful-provider workflows, escalation policy configuration, retention, and no-media-preview dashboard behavior under production tenant settings. | `feature/telegram-safety-escalation` |
+| Dashboard evidence cards | Implemented v0; needs production data validation | Validate against real tenant data, durable SDK evidence artifacts, and richer empty/error states while preserving the no-content display boundary. | `feature/dashboard-evidence-cards` |
+
+See [TRUEPRESENCE_ROADMAP.md](TRUEPRESENCE_ROADMAP.md) for the priority-ranked roadmap table.
+
+## Status Notes By Workstream
+
+### SDK Contracts
+
+Status: implemented v0.
+
+The public SDK contract layer lives under `truepresence/sdk/` and defines:
 
 - `InteractionFeaturePacket`
 - `TypingCadenceFeatures`
 - `PointerBehaviorFeatures`
 - `ChallengeInteractionFeatures`
+- `AgenticBehaviorFeatures`
 - `SessionContinuityFeatures`
 - `EnvironmentFeatures`
 - `ExternalRiskProviderFeatures`
 - `TruePresenceEvaluationRequest`
 - `TruePresenceEvaluationResponse`
 
-Required response fields:
+The response remains probabilistic and includes:
 
 ```json
 {
@@ -57,481 +90,85 @@ Required response fields:
 }
 ```
 
-Acceptance criteria:
+### Privacy-Preserving Feature Model
 
-- SDK contracts do not require raw user content.
-- Feature models support timing, cadence, rhythm, interaction entropy, and plausibility signals.
-- Response models remain probabilistic and avoid certainty claims.
+Status: implemented v0; needs hardening.
 
-### 2. Privacy-Preserving Feature Model
+The current model rejects raw typed text, raw key values, arbitrary unknown fields, and renamed raw-content fields. It accepts aggregate timing, cadence, pointer, challenge, environment, session-continuity, agentic, and external-risk-provider summaries.
 
-Implement derived-feature-only processing.
+Remaining work is not a new privacy model. It is allowlist hardening, regression coverage, and review of every new feature section before it can enter SDK payloads.
 
-Proposed files:
+### Web/SDK Evaluation Endpoint
 
-- `truepresence/sdk/privacy.py`
-- `truepresence/sdk/features.py`
-- `truepresence/detectors/privacy_guard.py`
+Status: implemented v0.
 
-Required behavior:
-
-- reject payloads containing raw typed text by default;
-- reject raw key values by default;
-- ignore password, payment, hidden, file, and explicitly ignored fields;
-- allow only aggregate metrics unless an explicit non-default mode is added later;
-- enforce `capture_content=false` as the default SDK posture.
-
-Allowed feature examples:
-
-- mean inter-key interval;
-- inter-key interval standard deviation;
-- characters-per-minute estimate;
-- correction count;
-- correction rate;
-- paste count;
-- time from field focus to first input;
-- time from prompt render to first input;
-- response latency;
-- expected reading time;
-- pointer entropy;
-- click hesitation;
-- scroll cadence summary.
-
-Disallowed by default:
-
-- actual typed text;
-- raw key values;
-- passwords;
-- payment data;
-- long-term biometric profiles;
-- full pointer trails tied to persistent identity.
-
-Acceptance criteria:
-
-- tests prove raw content is rejected or stripped;
-- tests prove timing-only payloads are accepted;
-- docs state: “collect behavior-derived features, not content.”
-
-### 3. Web Surface Adapter
-
-Add a web/browser surface separate from Telegram.
-
-Proposed files:
-
-- `truepresence/surfaces/web/__init__.py`
-- `truepresence/surfaces/web/adapter.py`
-- `truepresence/surfaces/web/event_schema.py`
-- `truepresence/surfaces/web/feature_normalizer.py`
-- `truepresence/surfaces/web/routes.py`
-
-Required endpoint:
+The SDK endpoint is:
 
 ```http
 POST /api/v1/truepresence/evaluate-interaction
 ```
 
-Input:
-
-- session id;
-- site id / tenant id;
-- page context;
-- derived behavior features;
-- optional challenge metadata;
-- optional external provider evidence.
+It accepts privacy-safe feature packets and returns `TruePresenceEvaluationResponse`. It runs independently of Telegram.
 
-Output:
+### Browser JavaScript SDK
 
-- human presence likelihood;
-- automation likelihood;
-- agentic control likelihood;
-- confidence;
-- reason codes;
-- evidence packet id;
-- recommended action;
-- enforcement mode.
+Status: implemented v0.
 
-Acceptance criteria:
+The browser SDK lives in `truepresence/sdk/*.js` and is documented in [TRUEPRESENCE_BROWSER_SDK.md](TRUEPRESENCE_BROWSER_SDK.md). It collects derived metrics locally and excludes raw text, sensitive fields, file fields, and ignored fields by default.
 
-- web evaluation can run without Telegram dependencies;
-- web adapter maps feature packets into the existing evidence packet / argument graph / decision engine pipeline;
-- endpoint returns a response compatible with SDK contracts.
+### Human Plausibility Detectors
 
-### 4. Browser JavaScript SDK
+Status: implemented v0.
 
-Add a minimal privacy-preserving browser SDK.
+Current detector coverage includes typing cadence, reading-time plausibility, paste/instant input patterns, correction patterns, pointer summaries, and human-consistent evidence. No detector alone should decide a final outcome.
 
-Proposed files:
+### Agentic-Control Detectors
 
-- `sdks/js/src/index.ts`
-- `sdks/js/src/collector.ts`
-- `sdks/js/src/features/typing.ts`
-- `sdks/js/src/features/pointer.ts`
-- `sdks/js/src/features/challenge.ts`
-- `sdks/js/src/privacy.ts`
-- `sdks/js/package.json`
-- `sdks/js/README.md`
+Status: implemented v0; needs hardening.
 
-Public API sketch:
+Agentic-control detection is intentionally separate from generic automation. The v0 detector family contributes to `agentic_control_likelihood`, but production tuning remains. See [TRUEPRESENCE_AGENTIC_DETECTION.md](TRUEPRESENCE_AGENTIC_DETECTION.md).
 
-```ts
-TruePresence.init({
-  siteKey: "tp_site_...",
-  endpoint: "https://example.com/api/v1/truepresence/evaluate-interaction",
-  captureContent: false,
-  mode: "privacy_preserving"
-});
+### Scoring And Signal Fusion
 
-TruePresence.protectForm("#signup-form", {
-  challenge: "typing_cadence",
-  sensitivity: "medium"
-});
-```
+Status: implemented v0.
 
-Required behavior:
+The deterministic probabilistic scorer aggregates signals by category, avoids overcounting repeated signals from the same category, applies corroboration and contradiction handling, and emits likelihoods, confidence, reason codes, and recommended action.
 
-- collect derived metrics locally;
-- never transmit raw text by default;
-- ignore sensitive fields;
-- support `data-truepresence="challenge"`;
-- support `data-truepresence="timing-only"`;
-- support `data-truepresence-ignore="true"`;
-- send summarized feature packets to the server.
+### Evidence Artifacts
 
-Acceptance criteria:
+Status: implemented v0; needs durable linkage.
 
-- unit tests prove no raw keystrokes or field contents are transmitted;
-- integration fixture demonstrates protected form evaluation;
-- SDK can operate in observe-only mode.
+SDK evidence artifacts are content-minimized and retrievable by `evidence_packet_id`. The first pass uses process-local storage and therefore needs production persistence, tenant scoping, retention controls, and stronger decision-artifact linkage. See [TRUEPRESENCE_EVIDENCE_ARTIFACTS.md](TRUEPRESENCE_EVIDENCE_ARTIFACTS.md).
 
-### 5. Human Plausibility Envelope
+### Challenge Framework
 
-Implement detectors that evaluate whether interaction timing is plausible for human operation.
+Status: implemented v0 modules; API/UI incomplete.
 
-Proposed files:
+Challenge modules exist under `truepresence/challenges/`, but the product still needs SDK-facing challenge start/complete routes and dashboard/admin observability. Challenges must evaluate process, not private knowledge.
 
-- `truepresence/detectors/human_plausibility.py`
-- `truepresence/detectors/typing_cadence.py`
-- `truepresence/detectors/reading_time.py`
-- `truepresence/detectors/pointer_entropy.py`
+### Risk Provider Connectors
 
-Required detectors:
+Status: planned; not yet implemented as provider connectors.
 
-- `implausible_read_response_time`;
-- `uniform_typing_cadence`;
-- `zero_correction_pattern`;
-- `instant_full_input`;
-- `paste_or_script_injection_pattern`;
-- `no_pointer_interaction`;
-- `low_interaction_entropy`;
-- `impossible_sequence_timing`.
+The SDK has an `ExternalRiskProviderFeatures` data shape and Telegram safety has a media-risk provider protocol, but there is no general `truepresence/risk_providers/` connector package yet.
 
-Reading-time detector:
+### Telegram Community Signals
 
-- estimate minimum plausible reading time from prompt length;
-- compare to response latency;
-- emit reason code when response occurs faster than plausible human reading and response time.
+Status: implemented v0; needs production hardening.
 
-Typing cadence detector:
+Telegram community signals are metadata-only and documented in [TRUEPRESENCE_TELEGRAM_COMMUNITY_SIGNALS.md](TRUEPRESENCE_TELEGRAM_COMMUNITY_SIGNALS.md). Remaining work is calibration, tenant policy controls, and production review behavior.
 
-- evaluate mean interval, variance, bursting, pauses, corrections, and paste events;
-- treat perfectly uniform cadence as suspicious;
-- avoid treating a single signal as determinative.
+### Telegram Safety Escalation
 
-Acceptance criteria:
+Status: implemented v0; needs operational hardening.
 
-- detectors return reason codes and severity/confidence contributions;
-- no detector directly decides “human” or “bot” alone;
-- tests cover human-like, scripted, pasted, and implausibly fast examples.
+Safety escalation records metadata-only risk evidence and avoids media preview or media storage by default. Remaining work is production provider workflow validation, retention, escalation policy configuration, and legal/ops review. See [TRUEPRESENCE_TELEGRAM_SAFETY.md](TRUEPRESENCE_TELEGRAM_SAFETY.md).
 
-### 6. Agentic-Control Detectors
+### Dashboard Evidence Cards
 
-Add detectors specifically aimed at AI browser agents, not just classic bots.
+Status: implemented v0; needs production data validation.
 
-Proposed files:
-
-- `truepresence/detectors/agentic_control.py`
-- `truepresence/detectors/dom_automation.py`
-- `truepresence/detectors/task_flow.py`
-
-Target signals:
-
-- DOM-first interaction patterns;
-- low exploratory noise;
-- direct navigation to relevant controls;
-- unusually efficient task completion;
-- model-thinking cadence: bursts of action separated by regular delays;
-- structured retries;
-- perfect recovery from errors;
-- large text appears instantly;
-- semantic intent jumps across page elements;
-- automation API or webdriver indicators where visible.
-
-Acceptance criteria:
-
-- agentic-control score is separate from generic automation score;
-- detectors support weak/medium/strong signal levels;
-- tests include Playwright/Selenium-style traces and simulated AI-agent traces.
-
-### 7. Scoring And Signal Fusion
-
-Create a scoring model that combines multiple weak signals into a probabilistic result.
-
-Proposed files:
-
-- `truepresence/scoring/__init__.py`
-- `truepresence/scoring/model.py`
-- `truepresence/scoring/weights.py`
-- `truepresence/scoring/calibration.py`
-
-Required design:
-
-- no single detector should create a final conclusion;
-- combine signal severity, confidence, and corroboration;
-- separate scores for:
-  - `human_presence_likelihood`;
-  - `automation_likelihood`;
-  - `agentic_control_likelihood`;
-- emit confidence separately from likelihood;
-- preserve reason codes and evidence references.
-
-Recommended initial approach:
-
-- deterministic weighted signal fusion for v0;
-- calibratable weights stored in config;
-- later replace or augment with trained calibration after test corpus exists.
-
-Acceptance criteria:
-
-- tests show multiple weak signals can raise risk;
-- tests show isolated weak signals do not overfire;
-- tests show strong contradictions reduce confidence;
-- scoring output includes explanation-ready reason codes.
-
-### 8. Challenge Framework
-
-Build process-based challenges that measure interaction mechanics rather than private knowledge.
-
-Proposed files:
-
-- `truepresence/challenges/__init__.py`
-- `truepresence/challenges/base.py`
-- `truepresence/challenges/typing_phrase.py`
-- `truepresence/challenges/reaction_timing.py`
-- `truepresence/challenges/visual_selection.py`
-
-Challenge examples:
-
-- type a displayed phrase;
-- wait until visual state changes, then click;
-- select an indicated visual element;
-- follow a short instruction where timing and process matter.
-
-Important rule:
-
-- challenges should evaluate process, not collect private knowledge.
-
-Acceptance criteria:
-
-- challenge response can be evaluated without storing typed content;
-- challenge outputs become derived features;
-- challenge failures recommend step-up or review rather than automatic punitive action.
-
-### 9. Enforcement Separation
-
-Separate signal generation from enforcement across all surfaces.
-
-Proposed files:
-
-- `truepresence/policy/actions.py`
-- `truepresence/policy/enforcement_mode.py`
-- update Telegram adapter to use shared policy enforcement mode.
-
-Required actions:
-
-- `allow`;
-- `observe`;
-- `soft_challenge`;
-- `step_up_auth`;
-- `rate_limit`;
-- `manual_review`;
-- `block`.
-
-Required modes:
-
-- `observe`;
-- `challenge_only`;
-- `review_required`;
-- `enforce`.
-
-Acceptance criteria:
-
-- default mode is observe;
-- production enforcement is opt-in;
-- Telegram does not remain the only enforcement model;
-- SDK consumers receive recommended actions, not automatic punishment by default.
-
-### 10. External Risk Provider Connectors
-
-Allow third-party bot/fraud/attestation providers to contribute evidence without becoming the final authority.
-
-Proposed files:
-
-- `truepresence/risk_providers/__init__.py`
-- `truepresence/risk_providers/base.py`
-- `truepresence/risk_providers/cloudflare.py`
-- `truepresence/risk_providers/fingerprint.py`
-- `truepresence/risk_providers/recaptcha.py`
-- `truepresence/risk_providers/arkose.py`
-
-Required contract:
-
-```python
-class RiskProvider:
-    def evaluate(self, request_context, session_context):
-        ...
-```
-
-Provider results should include:
-
-- provider name;
-- provider confidence;
-- risk score;
-- reason codes;
-- raw provider reference id;
-- whether score was verified server-side.
-
-Acceptance criteria:
-
-- external scores enter evidence packets as evidence;
-- external providers do not bypass TruePresence scoring;
-- missing provider data degrades gracefully.
-
-### 11. Testing And Staging Harness
-
-Build a controlled evaluation harness so TruePresence can measure its own accuracy.
-
-Proposed files:
-
-- `truepresence/testing/__init__.py`
-- `truepresence/testing/fixtures.py`
-- `truepresence/testing/scenarios.py`
-- `tests/truepresence/web/`
-- `tests/truepresence/detectors/`
-- `tests/truepresence/scoring/`
-- `tests/truepresence/fixtures/human_like_session.json`
-- `tests/truepresence/fixtures/scripted_bot_session.json`
-- `tests/truepresence/fixtures/agentic_browser_session.json`
-
-Scenario classes:
-
-- known human-like session;
-- pasted response session;
-- perfectly uniform typing session;
-- impossible reading-time response;
-- Playwright/Selenium-like session;
-- agentic browser session;
-- mixed human-plus-agent session.
-
-Acceptance criteria:
-
-- test harness can report false positive / false negative behavior for fixtures;
-- scoring model is validated against known scenarios;
-- regression tests prevent privacy contract violations.
-
-### 12. Evidence Packet Extension
-
-Extend existing evidence packet generation to support SDK/web-derived features.
-
-Proposed work:
-
-- update `truepresence/evidence/packet.py`;
-- update `truepresence/evidence/packet_builder.py`;
-- add feature sections for typing, pointer, challenge, session continuity, environment, external risk, and agentic behavior.
-
-Acceptance criteria:
-
-- evidence packets can explain decisions without raw content;
-- evidence packet includes feature summaries and reason codes;
-- evidence packet stores enough context for audit/replay.
-
-### 13. API And Dashboard Updates
-
-Expose SDK/web evaluation separately from Telegram.
-
-Proposed work:
-
-- add `/api/v1/truepresence/evaluate-interaction`;
-- add `/api/v1/truepresence/challenge/start`;
-- add `/api/v1/truepresence/challenge/complete`;
-- update dashboard to show SDK/web evaluations;
-- distinguish Telegram adapter events from web SDK events.
-
-Acceptance criteria:
-
-- web evaluations visible in dashboard;
-- dashboard shows likelihoods, confidence, reason codes, and evidence id;
-- no raw typed content shown anywhere.
-
-### 14. Documentation And Product Narrative
-
-Write a product narrative that prevents Telegram from becoming the accidental product center.
-
-Proposed docs:
-
-- `docs/TRUEPRESENCE_PRODUCT_NARRATIVE.md`
-- `docs/TRUEPRESENCE_WEB_SDK_CONTRACT.md`
-- `docs/TRUEPRESENCE_DETECTION_MODEL.md`
-- `docs/TRUEPRESENCE_PRIVACY_MODEL.md`
-- update existing issue register to distinguish SDK-core issues from Telegram adapter issues.
-
-Required language:
-
-- “interaction authenticity”;
-- “human-presence likelihood”;
-- “automation likelihood”;
-- “agentic-control likelihood”;
-- “privacy-preserving derived features”;
-- “signals, not certainty.”
-
-Avoid:
-
-- “proves human”;
-- “detects all AI agents”;
-- “identifies users by behavior”;
-- “records typing.”
-
-### 15. Immediate Fixes Already Identified
-
-Carry forward the earlier Telegram hardening, but treat it as adapter hardening, not core product work.
-
-Needed Telegram fixes:
-
-- require webhook secret in production;
-- add enforcement modes;
-- default Telegram to observe mode;
-- suppress punitive actions unless explicitly enabled;
-- include execution outcome in webhook responses/logs;
-- safer token decrypt fallback;
-- idempotent moderation outbox in a later pass.
-
-Acceptance criteria:
-
-- Telegram adapter follows the same signal-first policy as the web SDK;
-- Telegram does not bypass core enforcement mode controls.
-
-## Recommended Build Order
-
-1. SDK contracts and privacy-preserving feature models.
-2. Human plausibility detectors: reading time, typing cadence, correction rate, paste/script injection.
-3. Scoring and signal fusion.
-4. Web surface adapter and `/evaluate-interaction` endpoint.
-5. Minimal browser JS SDK.
-6. Challenge framework.
-7. Testing/staging harness with known scenarios.
-8. Agentic-control detectors.
-9. External risk provider connectors.
-10. Dashboard updates.
-11. Telegram adapter hardening using shared policy enforcement modes.
+Dashboard evidence cards distinguish Web SDK evaluations, Telegram evaluations, and safety escalations. They render likelihoods, confidence, reason codes, evidence IDs, decision IDs where available, recommended actions, and timestamps without displaying raw content. See [TRUEPRESENCE_DASHBOARD.md](TRUEPRESENCE_DASHBOARD.md).
 
 ## Strategic Rule
 

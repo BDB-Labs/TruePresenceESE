@@ -15,8 +15,10 @@
   - Includes WebSocket, Telegram, and auth routers when wiring succeeds
   - Exposes `/health` and `/ready`
 - `truepresence/api/server.py`
-  - Existing REST app for `/api/session/create`, `/api/v1/evaluate`, `/api/health`, and session utility routes
-  - New SDK/web route: `/api/v1/truepresence/evaluate-interaction` through the top-level mount
+  - REST app for `/api/session/create`, `/api/v1/evaluate`, `/api/health`, SDK evaluation, SDK evidence cards, and session utility routes
+  - SDK/web route: `/api/v1/truepresence/evaluate-interaction` through the top-level mount
+  - SDK evidence artifact route: `/api/v1/truepresence/evidence/{evidence_packet_id}`
+  - SDK dashboard evidence route: `/api/v1/truepresence/evidence/cards`
 - `truepresence/api/ws_server.py`
   - WebSocket router for session streams
 - `truepresence/api/auth.py`
@@ -44,7 +46,7 @@
   - `truepresence/runtime/distributed.py`
   - `truepresence/ese_runtime.py`
 
-## New SDK code added in this phase
+## SDK, scoring, and detector modules
 
 - SDK contracts and privacy-safe features:
   - `truepresence/sdk/__init__.py`
@@ -57,12 +59,49 @@
   - `truepresence/detectors/human_plausibility.py`
   - `truepresence/detectors/typing_cadence.py`
   - `truepresence/detectors/reading_time.py`
+  - `truepresence/detectors/agentic_control.py`
+  - `truepresence/detectors/telegram_community.py`
 - Deterministic v0 signal fusion:
   - `truepresence/scoring/__init__.py`
   - `truepresence/scoring/model.py`
   - `truepresence/scoring/weights.py`
 - API route:
-  - `truepresence/api/server.py` adds `POST /v1/truepresence/evaluate-interaction`, exposed as `/api/v1/truepresence/evaluate-interaction` by `truepresence/main.py`.
+  - `truepresence/api/server.py` exposes `POST /v1/truepresence/evaluate-interaction`, `GET /v1/truepresence/evidence/{evidence_packet_id}`, and `GET /v1/truepresence/evidence/cards` through the top-level `/api` mount.
+
+## Evidence, testing, challenge, and dashboard modules
+
+- SDK evidence artifacts:
+  - `truepresence/evidence/sdk_artifacts.py`
+  - `docs/TRUEPRESENCE_EVIDENCE_ARTIFACTS.md`
+- Evaluation harness:
+  - `truepresence/testing/fixtures.py`
+  - `truepresence/testing/scenarios.py`
+  - `truepresence/testing/reporting.py`
+  - `docs/TRUEPRESENCE_TESTING_HARNESS.md`
+- Challenge framework modules:
+  - `truepresence/challenges/engine.py`
+  - `truepresence/challenges/orchestrator.py`
+  - `truepresence/challenges/injector.py`
+  - `truepresence/challenges/response.py`
+  - `truepresence/challenges/scoring.py`
+  - `truepresence/challenges/validator.py`
+- Dashboard evidence cards:
+  - `truepresence/ui/src/app/dashboard/page.tsx`
+  - `truepresence/ui/src/app/dashboard/evaluation-card.tsx`
+  - `truepresence/ui/src/app/api/dashboard/evidence/route.ts`
+  - `docs/TRUEPRESENCE_DASHBOARD.md`
+
+## Telegram community and safety modules
+
+- Telegram community signals:
+  - `truepresence/surfaces/telegram/community.py`
+  - `truepresence/detectors/telegram_community.py`
+  - `docs/TRUEPRESENCE_TELEGRAM_COMMUNITY_SIGNALS.md`
+- Telegram safety escalation:
+  - `truepresence/safety/policy.py`
+  - `truepresence/safety/escalation.py`
+  - `truepresence/safety/evidence_minimization.py`
+  - `docs/TRUEPRESENCE_TELEGRAM_SAFETY.md`
 
 ## Browser JavaScript SDK
 
@@ -94,3 +133,15 @@
   - Telegram remains one adapter surface, not the center of the SDK-core path.
 - `ese/` and `ese_core/`
   - Included by setuptools for the broader ESE toolkit and CLI, but not the canonical TruePresence runtime package for this SDK work.
+
+## Documentation link map
+
+| Document | Role |
+|---|---|
+| [README](../README.md) | Product overview, quickstart, and repository structure |
+| [Browser SDK](TRUEPRESENCE_BROWSER_SDK.md) | Browser SDK integration and API reference |
+| [Privacy contract](TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md) | Privacy-safe feature, denylist, and response semantics |
+| [Scoring model](TRUEPRESENCE_SCORING_MODEL.md) | Likelihood, confidence, category aggregation, and reason-code model |
+| [SDK backlog](TRUEPRESENCE_SDK_IMPLEMENTATION_BACKLOG.md) | Completed v0 work and remaining roadmap backlog |
+| [Roadmap](TRUEPRESENCE_ROADMAP.md) | Priority-ranked workstream table |
+| [Dashboard evidence](TRUEPRESENCE_DASHBOARD.md) | Privacy-safe dashboard evidence-card behavior |

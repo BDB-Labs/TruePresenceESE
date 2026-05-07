@@ -205,8 +205,11 @@ Production auth requires `JWT_SECRET`. A development fallback is available only 
 |---|---|
 | [docs/TRUEPRESENCE_BROWSER_SDK.md](docs/TRUEPRESENCE_BROWSER_SDK.md) | Full browser SDK API reference, HTML attributes, and integration examples |
 | [docs/TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md](docs/TRUEPRESENCE_PRIVACY_PRESERVING_SDK_CONTRACT.md) | Privacy model, data collection boundaries, and output semantics contract |
-| [docs/TRUEPRESENCE_SDK_IMPLEMENTATION_BACKLOG.md](docs/TRUEPRESENCE_SDK_IMPLEMENTATION_BACKLOG.md) | Active implementation workstreams and acceptance criteria |
+| [docs/TRUEPRESENCE_SCORING_MODEL.md](docs/TRUEPRESENCE_SCORING_MODEL.md) | Deterministic probabilistic scoring model, likelihoods, confidence, and reason-code behavior |
+| [docs/TRUEPRESENCE_SDK_IMPLEMENTATION_BACKLOG.md](docs/TRUEPRESENCE_SDK_IMPLEMENTATION_BACKLOG.md) | Completed v0 workstreams, remaining hardening, and backlog details |
+| [docs/TRUEPRESENCE_ROADMAP.md](docs/TRUEPRESENCE_ROADMAP.md) | Priority-ranked roadmap table with branch names and status notes |
 | [docs/TRUEPRESENCE_CODEBASE_MAP.md](docs/TRUEPRESENCE_CODEBASE_MAP.md) | Canonical package paths, active modules, and API entry points |
+| [docs/TRUEPRESENCE_DASHBOARD.md](docs/TRUEPRESENCE_DASHBOARD.md) | Privacy-safe dashboard evidence-card display rules |
 | [docs/TRUEPRESENCE_V1_ARCHITECTURE.md](docs/TRUEPRESENCE_V1_ARCHITECTURE.md) | Architecture overview and design rationale |
 | [docs/TRUEPRESENCE_DECISION_ENGINE.md](docs/TRUEPRESENCE_DECISION_ENGINE.md) | Decision engine and evidence synthesis internals |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
