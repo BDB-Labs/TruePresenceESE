@@ -247,6 +247,27 @@ def test_api_rejects_content_in_typing() -> None:
     assert "content" in response.text
 
 
+@pytest.mark.parametrize("field_name,field_value", [
+    ("caption", "private image caption"),
+    ("media_url", "https://private.example/media.png"),
+    ("file_url", "https://private.example/file.pdf"),
+])
+def test_api_rejects_media_like_raw_fields_before_evidence_artifact(
+    field_name: str,
+    field_value: str,
+) -> None:
+    sdk_evidence_store.clear()
+    payload = _valid_payload()
+    payload["feature_packet"]["metadata"] = {field_name: field_value}
+
+    response = _client().post("/api/v1/truepresence/evaluate-interaction", json=payload)
+
+    assert response.status_code == 422
+    assert field_name in response.text
+    assert field_value not in response.text
+    assert sdk_evidence_store.count() == 0
+
+
 def test_api_rejects_unknown_section_field_in_typing() -> None:
     """A field not on the typing allowlist is rejected even if it sounds benign."""
     response = _client().post(

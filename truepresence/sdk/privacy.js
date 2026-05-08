@@ -6,7 +6,8 @@
  * Layer 1 — Global raw-content denylist
  *   isRawField() tests every key at every nesting depth.  Covers both the
  *   original disallowed names and the renamed variants (answer, response,
- *   comment, description, body, message, content, etc.).
+ *   comment, description, body, message, content, caption, media_url,
+ *   file_url, etc.).
  *
  * Layer 2 — Section-level allowlists
  *   stripRawContent() applies section allowlists when processing the known
@@ -47,11 +48,16 @@ const DISALLOWED_RAW_FIELDS = new Set([
   // Renamed raw-content variants (hardening additions)
   "answer",
   "body",
+  "caption",
   "comment",
   "content",
   "description",
   "field_value",
+  "file_url",
+  "fileurl",
   "input_value",
+  "media_url",
+  "mediaurl",
   "message",
   "prompt",
   "raw_input",

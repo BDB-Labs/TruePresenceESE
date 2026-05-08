@@ -12,9 +12,9 @@ Layer 1 — Section-level allowlist
 
 Layer 2 — Global raw-content denylist
   Applied recursively across the whole payload.  Catches renamed raw-content
-  fields (answer, response, comment, description, body, message, etc.) that
-  could appear at any nesting depth.  This layer fires regardless of whether
-  a field appears inside a known section.
+  fields (answer, response, comment, description, body, message, caption,
+  media_url, file_url, etc.) that could appear at any nesting depth.  This
+  layer fires regardless of whether a field appears inside a known section.
 
 The Pydantic models in contracts.py and features.py provide a third line of
 defence via extra="forbid", but that runs after this guard.  This guard is
@@ -230,11 +230,16 @@ _RAW_CONTENT_EXACT: frozenset[str] = frozenset(
         # Renamed raw-content fields (hardening additions)
         "answer",
         "body",
+        "caption",
         "comment",
         "content",
         "description",
         "field_value",
+        "file_url",
+        "fileurl",
         "input_value",
+        "media_url",
+        "mediaurl",
         "message",
         "prompt",
         "raw_input",

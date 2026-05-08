@@ -63,7 +63,9 @@ Allowed `feature_packet` sections:
 
 Allowed behavioral feature fields are aggregate-only. Examples include `mean_inter_key_interval_ms`, `inter_key_interval_stddev_ms`, `characters_per_minute`, `correction_count`, `correction_rate`, `paste_count`, `focus_to_first_input_ms`, `prompt_render_to_first_input_ms`, `typing_duration_ms`, `last_input_to_submit_ms`, `response_latency_ms`, `expected_reading_time_ms`, `pointer_entropy`, `pointer_movement_count`, `click_count`, `click_hesitation_ms`, `scroll_cadence_score`, `action_burst_count`, `route_directness_score`, `large_instant_delta_count`, and `structured_retry_count`.
 
-Direct API calls to `/api/v1/truepresence/evaluate-interaction` are subject to the same privacy rules as browser SDK submissions. Arbitrary free-form fields are rejected by default, including renamed raw-content fields such as `answer`, `response`, `comment`, `description`, `body`, `message`, `prompt`, `transcript`, `content`, `user_input`, `input_value`, `field_value`, `raw_value`, and `raw_input`.
+The backend rejects disallowed fields before scoring and before evidence artifacts are built. Browser SDK stripping is only a defensive client-side measure; direct API calls to `/api/v1/truepresence/evaluate-interaction` are subject to the same privacy rules as browser SDK submissions.
+
+Arbitrary free-form fields are rejected by default, including renamed raw-content fields such as `answer`, `response`, `comment`, `description`, `body`, `message`, `prompt`, `transcript`, `content`, `caption`, `media_url`, `file_url`, `user_input`, `input_value`, `field_value`, `raw_value`, and `raw_input`.
 
 ## What The SDK Must Not Collect By Default
 

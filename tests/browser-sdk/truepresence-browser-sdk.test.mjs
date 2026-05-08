@@ -483,6 +483,34 @@ test("beforeSend cannot inject renamed raw-content field 'content' into payload"
   assert.equal(body.includes("raw content here"), false);
 });
 
+for (const [fieldName, fieldValue] of [
+  ["caption", "private media caption"],
+  ["media_url", "https://private.example/media.png"],
+  ["file_url", "https://private.example/file.pdf"],
+]) {
+  test(`beforeSend cannot inject renamed raw-content field '${fieldName}' into payload`, async () => {
+    const harness = createHarness();
+    const sdk = initHarness(harness, {
+      beforeSend: (payload) => ({
+        ...payload,
+        feature_packet: {
+          ...payload.feature_packet,
+          metadata: {
+            ...payload.feature_packet.metadata,
+            [fieldName]: fieldValue,
+          },
+        },
+      }),
+    });
+
+    await sdk.evaluate();
+
+    const body = JSON.stringify(harness.calls[0].payload);
+    assert.equal(body.includes(`"${fieldName}"`), false, `${fieldName} field must be stripped`);
+    assert.equal(body.includes(fieldValue), false);
+  });
+}
+
 test("section allowlist strips unknown typing fields injected via beforeSend", async () => {
   const harness = createHarness();
   const sdk = initHarness(harness, {

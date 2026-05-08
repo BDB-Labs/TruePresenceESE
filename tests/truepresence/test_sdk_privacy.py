@@ -4,8 +4,9 @@ Tests for TruePresence SDK privacy guard.
 Covers:
   - Original denylist fields still rejected
   - Renamed raw-content fields rejected (answer, response, comment,
-    description, message, content, body, user_input, input_value,
-    field_value, raw_input, raw_value, prompt, transcript)
+    description, message, content, body, caption, media_url, file_url,
+    user_input, input_value, field_value, raw_input, raw_value, prompt,
+    transcript)
   - Known aggregate / timing fields still accepted
   - Unknown fields inside known sections are rejected
   - Approved metadata / page_context aggregate keys are accepted
@@ -109,6 +110,9 @@ def test_value_field_rejected() -> None:
     "body",
     "message",
     "content",
+    "caption",
+    "media_url",
+    "file_url",
     "prompt",
     "raw_input",
     "raw_value",
