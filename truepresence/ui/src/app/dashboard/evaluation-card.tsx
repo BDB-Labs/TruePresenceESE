@@ -7,23 +7,13 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-export type EvidenceEventType = "web_sdk" | "telegram" | "safety";
+import {
+  normalizeEvaluationEvidenceCard,
+  type EvaluationEvidenceCardData,
+  type EvidenceEventType,
+} from "./evidence-card-normalization";
 
-export interface EvaluationEvidenceCardData {
-  id: string;
-  eventType: EvidenceEventType;
-  surface: string;
-  risk_level?: string | null;
-  human_presence_likelihood?: number | null;
-  automation_likelihood?: number | null;
-  agentic_control_likelihood?: number | null;
-  confidence?: number | null;
-  reason_codes?: string[];
-  evidence_packet_id?: string | null;
-  decision_id?: string | null;
-  recommended_action?: string | null;
-  timestamp?: string | number | null;
-}
+export type { EvaluationEvidenceCardData, EvidenceEventType } from "./evidence-card-normalization";
 
 interface EvaluationEvidenceCardProps {
   card: EvaluationEvidenceCardData;
@@ -105,24 +95,25 @@ function riskBadgeClass(riskLevel: string) {
 }
 
 export function EvaluationEvidenceCard({ card }: EvaluationEvidenceCardProps) {
-  const riskLevel = formatHumanLabel(card.risk_level, "Unknown");
-  const reasonCodes = card.reason_codes ?? [];
-  const showLikelihoods = card.eventType !== "safety";
+  const safeCard = normalizeEvaluationEvidenceCard(card);
+  const riskLevel = formatHumanLabel(safeCard.risk_level, "Unknown");
+  const reasonCodes = safeCard.reason_codes ?? [];
+  const showLikelihoods = safeCard.eventType !== "safety";
   const likelihoods = [
     {
       icon: ShieldCheck,
       label: "Human presence",
-      value: formatPercent(card.human_presence_likelihood),
+      value: formatPercent(safeCard.human_presence_likelihood),
     },
     {
       icon: Bot,
       label: "Automation",
-      value: formatPercent(card.automation_likelihood),
+      value: formatPercent(safeCard.automation_likelihood),
     },
     {
       icon: Gauge,
       label: "Agentic control",
-      value: formatPercent(card.agentic_control_likelihood),
+      value: formatPercent(safeCard.agentic_control_likelihood),
     },
   ];
 
@@ -131,10 +122,10 @@ export function EvaluationEvidenceCard({ card }: EvaluationEvidenceCardProps) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase text-[var(--tp-accent)]">
-            {eventLabels[card.eventType]}
+            {eventLabels[safeCard.eventType]}
           </p>
           <h3 className="mt-1 break-words text-lg font-semibold text-[var(--tp-text-primary)]">
-            {formatHumanLabel(card.surface, "Unknown surface")}
+            {formatHumanLabel(safeCard.surface, "Unknown surface")}
           </h3>
         </div>
         <span className={riskBadgeClass(riskLevel)}>{riskLevel}</span>
@@ -163,42 +154,42 @@ export function EvaluationEvidenceCard({ card }: EvaluationEvidenceCardProps) {
         <div>
           <dt className="text-[var(--tp-text-muted)]">Confidence</dt>
           <dd className="mt-1 font-medium text-[var(--tp-text-primary)]">
-            {formatPercent(card.confidence)}
+            {formatPercent(safeCard.confidence)}
           </dd>
         </div>
         <div>
           <dt className="text-[var(--tp-text-muted)]">Recommended action</dt>
           <dd className="mt-1 break-words font-medium text-[var(--tp-text-primary)]">
-            {formatHumanLabel(card.recommended_action, "n/a")}
+            {formatHumanLabel(safeCard.recommended_action, "n/a")}
           </dd>
         </div>
         <div>
           <dt className="text-[var(--tp-text-muted)]">Timestamp</dt>
           <dd className="mt-1 flex items-center gap-2 font-medium text-[var(--tp-text-primary)]">
             <Clock className="h-4 w-4 flex-shrink-0 text-[var(--tp-text-muted)]" />
-            <span className="break-words">{formatTimestamp(card.timestamp)}</span>
+            <span className="break-words">{formatTimestamp(safeCard.timestamp)}</span>
           </dd>
         </div>
       </dl>
 
-      {(card.evidence_packet_id || card.decision_id) && (
+      {(safeCard.evidence_packet_id || safeCard.decision_id) && (
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
-          {card.evidence_packet_id && (
+          {safeCard.evidence_packet_id && (
             <div>
               <dt className="flex items-center gap-2 text-[var(--tp-text-muted)]">
                 <Fingerprint className="h-4 w-4" />
                 Evidence packet
               </dt>
               <dd className="mt-1 break-all font-mono text-xs text-[var(--tp-text-primary)]">
-                {card.evidence_packet_id}
+                {safeCard.evidence_packet_id}
               </dd>
             </div>
           )}
-          {card.decision_id && (
+          {safeCard.decision_id && (
             <div>
               <dt className="text-[var(--tp-text-muted)]">Decision</dt>
               <dd className="mt-1 break-all font-mono text-xs text-[var(--tp-text-primary)]">
-                {card.decision_id}
+                {safeCard.decision_id}
               </dd>
             </div>
           )}

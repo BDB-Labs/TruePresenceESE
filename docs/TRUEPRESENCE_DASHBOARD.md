@@ -40,6 +40,17 @@ Dashboard cards must not display raw content fields, including:
 
 The UI enforces this by normalizing backend payloads into a small card shape before rendering. The SDK dashboard endpoint also returns minimized card records instead of full evidence artifacts, so derived feature summaries and detector traces are not sent to the dashboard view.
 
+Client-side card normalization is a defensive allowlist. Before a Web SDK,
+Telegram, or Safety card is rendered, the dashboard drops every field except
+`id`, `eventType`, `surface`, `risk_level`, `human_presence_likelihood`,
+`automation_likelihood`, `agentic_control_likelihood`, `confidence`,
+`reason_codes`, `evidence_packet_id`, `decision_id`, `recommended_action`, and
+`timestamp`. Known raw-content fields such as `typed_text`, `raw_text`,
+`key_values`, `keys`, `message`, `caption`, `content`, `media_url`, `file_url`,
+`thumbnail`, `password`, and `card_number` are never passed into the card
+component. Malformed backend responses should therefore degrade to safe defaults
+instead of crashing or displaying free-form artifact fields.
+
 ## Authentication And Tenant Isolation
 
 Dashboard evidence endpoints require authentication:

@@ -19,6 +19,7 @@ import {
   formatHumanLabel,
   type EvaluationEvidenceCardData,
 } from "./evaluation-card";
+import { normalizeEvaluationEvidenceCard } from "./evidence-card-normalization";
 
 interface TelegramStatus {
   status?: string;
@@ -115,6 +116,10 @@ function formatConfidence(value: number | undefined) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function arrayValue<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
 }
 
 function recordValue(
@@ -328,60 +333,67 @@ function evidenceCardFromReview(review: ReviewItem): EvaluationEvidenceCardData 
     stringValue(decisionArtifact, "evidence_packet_id") ||
     stringValue(evidencePacket, "packet_id");
 
-  return {
-    id:
-      review.review_id ||
-      stringValue(evidenceCard, "evidence_id") ||
-      evidencePacketId ||
-      decisionId ||
-      review.created_at ||
-      "telegram-evidence",
-    eventType: safety ? "safety" : "telegram",
-    surface:
-      stringValue(evidenceCard, "surface") ||
-      stringValue(decisionObject, "surface") ||
-      "telegram",
-    risk_level:
-      stringValue(evidenceCard, "risk_label") ||
-      stringValue(risk, "level") ||
-      stringValue(risk, "label") ||
-      stringValue(decisionObject, "risk_level") ||
-      stringValue(decisionArtifact, "risk_level"),
-    human_presence_likelihood: safety
-      ? undefined
-      : numberValue(final, "human_presence_likelihood") ??
-        numberValue(final, "human_probability") ??
-        numberValue(evaluation, "human_probability") ??
-        numberValue(decisionObject, "human_probability"),
-    automation_likelihood: safety
-      ? undefined
-      : numberValue(final, "automation_likelihood") ??
-        numberValue(final, "bot_probability") ??
-        numberValue(evaluation, "bot_probability") ??
-        numberValue(decisionObject, "bot_probability"),
-    agentic_control_likelihood: safety
-      ? undefined
-      : numberValue(final, "agentic_control_likelihood") ??
-        numberValue(evaluation, "agentic_control_likelihood"),
-    confidence:
-      numberValue(evidenceCard, "confidence") ??
-      numberValue(action, "confidence") ??
-      numberValue(final, "confidence") ??
-      numberValue(evaluation, "confidence") ??
-      numberValue(decisionObject, "confidence"),
-    reason_codes: reviewReasonCodes(review, evidenceCard, final, action),
-    evidence_packet_id: safety ? undefined : evidencePacketId,
-    decision_id: safety ? undefined : decisionId,
-    recommended_action:
-      stringValue(evidenceCard, "recommended_action") ||
-      stringValue(action, "action") ||
-      stringValue(decisionObject, "recommended_enforcement") ||
-      review.status,
-    timestamp:
-      timestampValue(timestamps, "created_at") ||
-      timestampValue(timestamps, "event_timestamp") ||
-      review.created_at,
-  };
+  return normalizeEvaluationEvidenceCard(
+    {
+      id:
+        review.review_id ||
+        stringValue(evidenceCard, "evidence_id") ||
+        evidencePacketId ||
+        decisionId ||
+        review.created_at ||
+        "telegram-evidence",
+      eventType: safety ? "safety" : "telegram",
+      surface:
+        stringValue(evidenceCard, "surface") ||
+        stringValue(decisionObject, "surface") ||
+        "telegram",
+      risk_level:
+        stringValue(evidenceCard, "risk_label") ||
+        stringValue(risk, "level") ||
+        stringValue(risk, "label") ||
+        stringValue(decisionObject, "risk_level") ||
+        stringValue(decisionArtifact, "risk_level"),
+      human_presence_likelihood: safety
+        ? undefined
+        : numberValue(final, "human_presence_likelihood") ??
+          numberValue(final, "human_probability") ??
+          numberValue(evaluation, "human_probability") ??
+          numberValue(decisionObject, "human_probability"),
+      automation_likelihood: safety
+        ? undefined
+        : numberValue(final, "automation_likelihood") ??
+          numberValue(final, "bot_probability") ??
+          numberValue(evaluation, "bot_probability") ??
+          numberValue(decisionObject, "bot_probability"),
+      agentic_control_likelihood: safety
+        ? undefined
+        : numberValue(final, "agentic_control_likelihood") ??
+          numberValue(evaluation, "agentic_control_likelihood"),
+      confidence:
+        numberValue(evidenceCard, "confidence") ??
+        numberValue(action, "confidence") ??
+        numberValue(final, "confidence") ??
+        numberValue(evaluation, "confidence") ??
+        numberValue(decisionObject, "confidence"),
+      reason_codes: reviewReasonCodes(review, evidenceCard, final, action),
+      evidence_packet_id: safety ? undefined : evidencePacketId,
+      decision_id: safety ? undefined : decisionId,
+      recommended_action:
+        stringValue(evidenceCard, "recommended_action") ||
+        stringValue(action, "action") ||
+        stringValue(decisionObject, "recommended_enforcement") ||
+        review.status,
+      timestamp:
+        timestampValue(timestamps, "created_at") ||
+        timestampValue(timestamps, "event_timestamp") ||
+        review.created_at,
+    },
+    {
+      fallbackEventType: safety ? "safety" : "telegram",
+      fallbackId: review.review_id || evidencePacketId || decisionId || "telegram-evidence",
+      fallbackSurface: "telegram",
+    },
+  );
 }
 
 export default function DashboardPage() {
@@ -530,7 +542,7 @@ export default function DashboardPage() {
   };
 
   const reviews = useMemo(
-    () => state.reviews?.pending_reviews ?? [],
+    () => arrayValue<ReviewItem>(state.reviews?.pending_reviews),
     [state.reviews?.pending_reviews],
   );
   const selectedReviewCard = useMemo(
@@ -543,12 +555,13 @@ export default function DashboardPage() {
   );
   const webSdkCards = useMemo<EvaluationEvidenceCardData[]>(
     () =>
-      (state.sdkEvidence?.evidence_cards ?? []).map((card, index) => ({
-        ...card,
-        id: card.evidence_packet_id || `web-sdk-evidence-${index}`,
-        eventType: "web_sdk",
-        surface: card.surface || "web",
-      })),
+      arrayValue<unknown>(state.sdkEvidence?.evidence_cards).map((card, index) =>
+        normalizeEvaluationEvidenceCard(card, {
+          fallbackEventType: "web_sdk",
+          fallbackId: `web-sdk-evidence-${index}`,
+          fallbackSurface: "web",
+        }),
+      ),
     [state.sdkEvidence],
   );
   const reviewEvidenceCards = useMemo(
