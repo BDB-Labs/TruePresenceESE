@@ -15,6 +15,10 @@ from truepresence.safety.policy import (
     evaluate_telegram_safety_policy,
 )
 
+_PROVIDER_CONFIDENCE_FALLBACK = 0.55
+_REASON_CONFIDENCE_BONUS = 0.04
+_MAX_REASON_CONFIDENCE_BONUS = 0.12
+
 
 class ProviderRiskSignal(BaseModel):
     """External lawful-provider reference without local media classification."""
@@ -100,18 +104,76 @@ def _recommended_action(score: float, reason_count: int, provider: ProviderRiskS
     return "admin_review"
 
 
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _provider_assessment_confidence(provider: ProviderRiskSignal | None) -> float:
+    if provider is None:
+        return 0.0
+    if provider.confidence is not None:
+        return _clamp01(provider.confidence)
+    return min(_PROVIDER_CONFIDENCE_FALLBACK, _clamp01(provider.risk_score))
+
+
+def _has_sufficient_metadata(
+    features: TelegramSafetyFeatures,
+    provider: ProviderRiskSignal | None,
+) -> bool:
+    references = [
+        features.chat_id,
+        features.message_id,
+        features.sender_id,
+        features.event_timestamp,
+    ]
+    present_reference_count = sum(reference is not None for reference in references)
+    if provider is not None and provider.provider_reference_id:
+        present_reference_count += 1
+    return features.media_present and present_reference_count >= 3
+
+
+def _reason_corroboration_bonus(
+    *,
+    reason_codes: list[str],
+    features: TelegramSafetyFeatures,
+    provider: ProviderRiskSignal | None,
+) -> float:
+    if not _has_sufficient_metadata(features, provider):
+        return 0.0
+    additional_reasons = max(0, len(set(reason_codes)) - 1)
+    return min(_MAX_REASON_CONFIDENCE_BONUS, additional_reasons * _REASON_CONFIDENCE_BONUS)
+
+
+def _assessment_confidence(
+    *,
+    signals: list[SafetySignal],
+    provider: ProviderRiskSignal | None,
+    reason_codes: list[str],
+    features: TelegramSafetyFeatures,
+) -> float:
+    signal_confidence = max((signal.confidence for signal in signals), default=0.0)
+    provider_confidence = _provider_assessment_confidence(provider)
+    reason_bonus = _reason_corroboration_bonus(
+        reason_codes=reason_codes,
+        features=features,
+        provider=provider,
+    )
+    return _clamp01(max(signal_confidence, provider_confidence) + reason_bonus)
+
+
 def evaluate_telegram_safety_escalation(
     features: TelegramSafetyFeatures,
     provider_signal: ProviderRiskSignal | dict[str, Any] | None = None,
 ) -> SafetyEscalation | None:
     provider = _provider_signal_from(provider_signal)
-    signals = evaluate_telegram_safety_policy(features)
+    policy_signals = evaluate_telegram_safety_policy(features)
+    signals = list(policy_signals)
     if provider is not None and provider.risk_score >= 0.65:
         signals.append(
             SafetySignal(
                 reason_code="new_account_high_risk_media_behavior",
                 severity="critical" if provider.risk_score >= 0.85 else "high",
-                confidence=provider.confidence or provider.risk_score,
+                confidence=_provider_assessment_confidence(provider),
                 explanation="Lawful provider supplied a high-risk media reference outcome.",
             )
         )
@@ -120,10 +182,15 @@ def evaluate_telegram_safety_escalation(
     if not reason_codes:
         return None
 
-    signal_score = max((signal.confidence for signal in signals), default=0.0)
+    signal_score = max((signal.confidence for signal in policy_signals), default=0.0)
     provider_score = provider.risk_score if provider is not None else 0.0
     score = max(signal_score, provider_score)
-    confidence = max(score, max((provider.confidence or 0.0,) if provider else (0.0,)))
+    confidence = _assessment_confidence(
+        signals=signals,
+        provider=provider,
+        reason_codes=reason_codes,
+        features=features,
+    )
     action = _recommended_action(score, len(reason_codes), provider)
     evidence_card = build_telegram_safety_evidence_card(
         chat_id=features.chat_id,

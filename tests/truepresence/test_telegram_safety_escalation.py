@@ -11,6 +11,10 @@ from truepresence.adapters.telegram_bot import TelegramProtectionService  # noqa
 from truepresence.safety.escalation import (  # noqa: E402
     ProviderRiskSignal,
     build_telegram_safety_evidence_card,
+    evaluate_telegram_safety_escalation,
+)
+from truepresence.safety.policy import (  # noqa: E402
+    TelegramSafetyFeatures,
 )
 
 
@@ -48,8 +52,55 @@ def _media_update(
     }
 
 
+def _forwarded_media_update(
+    user_id: int,
+    chat_id: int,
+    date: int,
+    *,
+    message_id: int,
+    file_id: str,
+    caption: str = "forwarded sensitive caption must never be retained",
+) -> dict:
+    update = _media_update(
+        user_id=user_id,
+        chat_id=chat_id,
+        date=date,
+        message_id=message_id,
+        file_id=file_id,
+        caption=caption,
+    )
+    update["message"]["forward_origin"] = {
+        "type": "user",
+        "sender_user": {"id": 999_001, "username": "forward-source"},
+    }
+    update["message"]["forward_date"] = date - 20
+    update["message"]["media_url"] = "https://private.example.invalid/media-preview"
+    return update
+
+
 def _safety(event: dict) -> dict:
     return event["context"]["telegram_safety"]
+
+
+def _assert_no_media_or_raw_content(value: object, *secret_values: str) -> None:
+    encoded = json.dumps(value)
+    for secret in secret_values:
+        assert secret not in encoded
+    for forbidden in [
+        "caption",
+        "file_id",
+        "file_unique_id",
+        "file_url",
+        "media_url",
+        "message_text",
+        "original_message",
+        "photo",
+        "raw_content",
+        "raw_text",
+        "thumbnail",
+        "update",
+    ]:
+        assert forbidden not in encoded
 
 
 def test_media_update_is_processed_without_storing_or_downloading_media() -> None:
@@ -76,8 +127,10 @@ def test_media_update_is_processed_without_storing_or_downloading_media() -> Non
     assert safety["evidence_card"]["message_id"] == 1
     assert secret_file_id not in encoded_safety
     assert secret_caption not in encoded_safety
+    assert "message_text" not in encoded_safety
     assert "photo" not in encoded_payload
     assert "thumbnail" not in encoded_safety
+    _assert_no_media_or_raw_content(safety, secret_file_id, secret_caption)
 
 
 def test_high_risk_media_burst_produces_safety_escalation() -> None:
@@ -109,6 +162,147 @@ def test_high_risk_media_burst_produces_safety_escalation() -> None:
     assert action["safety_evidence_card"]["risk_label"] == "critical"
 
 
+def test_safety_confidence_without_provider_uses_detector_signal_confidence() -> None:
+    escalation = evaluate_telegram_safety_escalation(
+        TelegramSafetyFeatures(
+            chat_id=-2101,
+            message_id=11,
+            sender_id=501,
+            event_timestamp=1_700_501_000,
+            media_present=True,
+            join_to_first_media_ms=1_000,
+        )
+    )
+
+    assert escalation is not None
+    assert escalation.risk_score == pytest.approx(0.86)
+    assert escalation.confidence == pytest.approx(0.86)
+    assert escalation.risk_label == "critical"
+
+
+def test_safety_confidence_with_provider_signal_uses_provider_confidence() -> None:
+    escalation = evaluate_telegram_safety_escalation(
+        TelegramSafetyFeatures(
+            chat_id=-2102,
+            message_id=12,
+            sender_id=502,
+            event_timestamp=1_700_502_000,
+            media_present=True,
+        ),
+        provider_signal=ProviderRiskSignal(
+            provider_id="lawful-risk-provider",
+            provider_reference_id="provider-ref-medium",
+            outcome="provider_reference_only",
+            risk_score=0.72,
+            confidence=0.61,
+        ),
+    )
+
+    assert escalation is not None
+    assert escalation.risk_score == pytest.approx(0.72)
+    assert escalation.confidence == pytest.approx(0.61)
+    assert escalation.confidence != pytest.approx(escalation.risk_score)
+
+
+def test_safety_confidence_multiple_signals_gets_bounded_corroboration_bonus() -> None:
+    escalation = evaluate_telegram_safety_escalation(
+        TelegramSafetyFeatures(
+            chat_id=-2103,
+            message_id=13,
+            sender_id=503,
+            event_timestamp=1_700_503_000,
+            media_present=True,
+            join_to_first_media_ms=1_000,
+            media_count_window=4,
+            media_burst_count=3,
+            account_age_days=3,
+        )
+    )
+
+    assert escalation is not None
+    assert {
+        "instant_media_post_after_join",
+        "media_burst_pattern",
+        "new_account_high_risk_media_behavior",
+    }.issubset(set(escalation.reason_codes))
+    assert escalation.risk_score == pytest.approx(0.88)
+    assert escalation.confidence == pytest.approx(0.96)
+    assert escalation.confidence - escalation.risk_score <= 0.12
+
+
+def test_safety_confidence_high_risk_can_remain_moderate_confidence() -> None:
+    escalation = evaluate_telegram_safety_escalation(
+        TelegramSafetyFeatures(
+            chat_id=-2104,
+            message_id=14,
+            sender_id=504,
+            event_timestamp=1_700_504_000,
+            media_present=True,
+        ),
+        provider_signal=ProviderRiskSignal(
+            provider_id="lawful-risk-provider",
+            provider_reference_id="provider-ref-high-risk",
+            outcome="high_risk_reference",
+            risk_score=0.93,
+            confidence=0.55,
+        ),
+    )
+
+    assert escalation is not None
+    assert escalation.risk_score == pytest.approx(0.93)
+    assert escalation.risk_label == "critical"
+    assert escalation.confidence == pytest.approx(0.55)
+    assert escalation.recommended_action == "mandatory_safety_escalation"
+
+
+def test_safety_confidence_provider_high_confidence_can_exceed_risk() -> None:
+    escalation = evaluate_telegram_safety_escalation(
+        TelegramSafetyFeatures(
+            chat_id=-2105,
+            message_id=15,
+            sender_id=505,
+            event_timestamp=1_700_505_000,
+            media_present=True,
+        ),
+        provider_signal=ProviderRiskSignal(
+            provider_id="lawful-risk-provider",
+            provider_reference_id="provider-ref-high-confidence",
+            outcome="high_confidence_reference",
+            risk_score=0.7,
+            confidence=0.97,
+        ),
+    )
+
+    assert escalation is not None
+    assert escalation.risk_score == pytest.approx(0.7)
+    assert escalation.confidence == pytest.approx(0.97)
+    assert escalation.confidence != pytest.approx(escalation.risk_score)
+
+
+def test_safety_confidence_missing_provider_confidence_does_not_mirror_provider_risk() -> None:
+    escalation = evaluate_telegram_safety_escalation(
+        TelegramSafetyFeatures(
+            chat_id=-2106,
+            message_id=16,
+            sender_id=506,
+            event_timestamp=1_700_506_000,
+            media_present=True,
+        ),
+        provider_signal=ProviderRiskSignal(
+            provider_id="lawful-risk-provider",
+            provider_reference_id="provider-ref-no-confidence",
+            outcome="risk_without_confidence",
+            risk_score=0.91,
+            confidence=None,
+        ),
+    )
+
+    assert escalation is not None
+    assert escalation.risk_score == pytest.approx(0.91)
+    assert escalation.confidence == pytest.approx(0.55)
+    assert escalation.confidence != pytest.approx(escalation.risk_score)
+
+
 def test_provider_reference_is_stored_without_media_content() -> None:
     provider_signal = ProviderRiskSignal(
         provider_id="lawful-risk-provider",
@@ -138,6 +332,72 @@ def test_provider_reference_is_stored_without_media_content() -> None:
     assert "file_id" not in encoded
     assert "thumbnail" not in encoded
     assert "caption" not in encoded
+    _assert_no_media_or_raw_content(card)
+
+
+def test_forwarded_media_metadata_safety_evidence_is_metadata_only() -> None:
+    adapter = TelegramAdapter()
+    secret_file_id = "FORWARDED_FILE_ID_MUST_NOT_BE_STORED"
+    secret_caption = "FORWARDED_CAPTION_MUST_NOT_BE_STORED"
+
+    event = adapter.parse_update(
+        _forwarded_media_update(
+            user_id=606,
+            chat_id=-2606,
+            date=1_700_606_000,
+            message_id=66,
+            file_id=secret_file_id,
+            caption=secret_caption,
+        )
+    )
+
+    safety = _safety(event)
+    assert safety["evidence_card"]["media_present"] is True
+    assert safety["evidence_card"]["chat_id"] == -2606
+    assert safety["evidence_card"]["message_id"] == 66
+    _assert_no_media_or_raw_content(safety, secret_file_id, secret_caption)
+
+
+def test_provider_receives_reference_metadata_without_media_or_caption() -> None:
+    captured_metadata = {}
+
+    def provider(metadata: dict) -> dict:
+        captured_metadata.update(metadata)
+        return {
+            "provider_id": "lawful-risk-provider",
+            "provider_reference_id": "provider-ref-from-adapter",
+            "outcome": "provider_reference_only",
+            "risk_score": 0.89,
+            "confidence": 0.82,
+        }
+
+    adapter = TelegramAdapter({"safety_provider": provider})
+    secret_file_id = "PROVIDER_FILE_ID_MUST_NOT_BE_SENT"
+    secret_caption = "PROVIDER_CAPTION_MUST_NOT_BE_SENT"
+
+    event = adapter.parse_update(
+        _media_update(
+            user_id=707,
+            chat_id=-2707,
+            date=1_700_707_000,
+            message_id=77,
+            file_id=secret_file_id,
+            caption=secret_caption,
+        )
+    )
+
+    safety = _safety(event)
+    assert captured_metadata == {
+        "chat_id": -2707,
+        "message_id": 77,
+        "sender_id": 707,
+        "event_timestamp": 1_700_707_000,
+        "event_type": "message",
+        "media_present": True,
+    }
+    assert safety["evidence_card"]["provider_reference_id"] == "provider-ref-from-adapter"
+    assert safety["evidence_card"]["provider_outcome"] == "provider_reference_only"
+    _assert_no_media_or_raw_content(safety, secret_file_id, secret_caption)
 
 
 def test_safety_review_dashboard_payload_contains_no_media_or_content() -> None:
@@ -201,3 +461,5 @@ def test_safety_review_dashboard_payload_contains_no_media_or_content() -> None:
     assert secret_caption not in encoded
     assert "photo" not in encoded
     assert "thumbnail" not in encoded
+    assert "media_preview" not in encoded
+    _assert_no_media_or_raw_content(review, secret_file_id, secret_caption)
