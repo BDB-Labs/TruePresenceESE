@@ -156,6 +156,21 @@ def init_db():
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS sdk_evidence_artifacts (
+        evidence_packet_id VARCHAR(255) PRIMARY KEY,
+        tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+        session_id VARCHAR(255) NOT NULL,
+        surface VARCHAR(100) NOT NULL DEFAULT 'web',
+        created_at TIMESTAMPTZ NOT NULL,
+        feature_summaries JSONB NOT NULL DEFAULT '{}'::jsonb,
+        detector_signals JSONB NOT NULL DEFAULT '[]'::jsonb,
+        reason_codes JSONB NOT NULL DEFAULT '[]'::jsonb,
+        likelihoods JSONB NOT NULL DEFAULT '{}'::jsonb,
+        confidence DOUBLE PRECISION NOT NULL,
+        recommended_action VARCHAR(100) NOT NULL,
+        scoring_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+
     CREATE INDEX IF NOT EXISTS idx_users_email     ON users(email);
     CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_users_role      ON users(role);
@@ -164,6 +179,8 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_reviews_created ON telegram_pending_reviews(created_at);
     CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON telegram_user_sessions(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_updated ON telegram_user_sessions(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_sdk_evidence_tenant_created ON sdk_evidence_artifacts(tenant_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sdk_evidence_session ON sdk_evidence_artifacts(session_id);
     """
 
     with get_db() as conn:

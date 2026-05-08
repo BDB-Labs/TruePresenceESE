@@ -51,12 +51,26 @@ The response includes derived metrics, detector-signal metadata, reason codes, l
 
 Unknown artifact IDs return `404`.
 
-## Persistence Caveat
+## Production Persistence
 
-This first pass uses a storage abstraction with a process-local in-memory implementation. It is suitable for tests and local/non-DB deployments, but it is not durable across process restarts.
+SDK evidence artifacts use a storage abstraction with two implementations:
 
-Production persistence should replace the in-memory store with a durable backend, such as a database table or evidence-artifact object store, while preserving the same content-minimized schema and retention controls.
+- `InMemorySdkEvidenceArtifactStore` for tests and local development.
+- `PostgresSdkEvidenceArtifactStore` for durable runtime persistence.
+
+Production deployments should run the Alembic migration that creates `sdk_evidence_artifacts`. The table stores one row per `evidence_packet_id` with tenant, session, surface, timestamp, minimized feature summaries, detector signals, reason codes, likelihoods, confidence, recommended action, and scoring metadata.
+
+The runtime store selector uses the DB-backed store when database configuration is present outside test/development mode. Local tests can still use the in-memory store, and store-specific tests can inject a SQLite connection to verify persistence semantics without requiring production infrastructure.
+
+The `TRUEPRESENCE_SDK_EVIDENCE_STORE` environment variable can force store selection:
+
+- `postgres`, `db`, or `database` for DB-backed storage;
+- `memory`, `in_memory`, or `test` for process-local storage.
+
+`TRUEPRESENCE_SDK_EVIDENCE_AUTO_INIT=1` can initialize the DB schema from the store for simple deployments, but Alembic remains the preferred production migration path.
 
 ## Retention
 
 Retention should be tenant-configurable. Default production retention should be short and aligned with the purpose of auditability, dispute handling, or operational troubleshooting. Artifacts should be deleted when they are no longer needed for those purposes.
+
+The placeholder configuration value is `TRUEPRESENCE_SDK_EVIDENCE_RETENTION_DAYS`, with a default of 30 days. This change defines the policy hook but does not perform destructive cleanup automatically.
