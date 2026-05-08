@@ -18,7 +18,7 @@
     },
     "challenge": {
       "challenge_type": "typing_cadence",
-      "response_latency_ms": 145,
+      "response_latency_ms": 2200,
       "expected_reading_time_ms": 1800,
       "prompt_render_to_first_input_ms": 24,
       "correction_count": 0,
@@ -88,5 +88,17 @@
       "category": "environment",
       "explanation": "Browser environment aggregates indicate automation tooling."
     }
-  ]
+  ],
+  "_meta": {
+    "expected_category": "automation",
+    "description": "Scripted form fill with derived paste, cadence, and automation environment signals. The response waits long enough not to be classified as agentic control.",
+    "expected": {
+      "class": "automation",
+      "human_presence_likelihood": [0.0, 0.2],
+      "automation_likelihood": [0.65, 0.8],
+      "agentic_control_likelihood": [0.0, 0.15],
+      "confidence": [0.85, 1.0],
+      "recommended_action": ["manual_review"]
+    }
+  }
 }

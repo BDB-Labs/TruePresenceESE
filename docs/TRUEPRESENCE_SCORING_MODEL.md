@@ -76,6 +76,25 @@ Initial deterministic scenario fixtures live in `tests/truepresence/fixtures/`:
 - `human_like_session.json`;
 - `scripted_bot_session.json`;
 - `low_evidence_session.json`;
-- `contradictory_session.json`.
+- `contradictory_session.json`;
+- `browser_automation_session.json`;
+- `agentic_like_session.json`.
 
 Fixtures contain derived metrics and detector signal metadata only. They must not contain raw text, raw input values, transcripts, prompts, comments, messages, or other free-form user content.
+
+Each calibration fixture records expected output ranges in `_meta.expected`:
+
+- expected class or type;
+- expected `human_presence_likelihood` range;
+- expected `automation_likelihood` range;
+- expected `agentic_control_likelihood` range;
+- expected confidence range;
+- acceptable recommended actions.
+
+The evaluation harness loads those expectations by default, runs detectors plus fixture signals, scores the interaction, and reports fixture name, expected class, likelihoods, confidence, recommended action, per-field pass/fail status, and false-positive/false-negative summary counts.
+
+The false-positive/false-negative counts are intentionally basic calibration indicators. A benign fixture is counted as a false positive when the recommended action escalates to challenge, step-up, or manual review. An automation or agentic-control fixture is counted as a false negative when the action stays at allow or observe.
+
+## Fixture Calibration Limitations
+
+The fixture set is a deterministic regression harness, not a statistical benchmark. The ranges document current intended behavior across representative derived-metric examples. They should be updated deliberately when detector semantics or product policy changes, and weight changes should be documented with the reason for the changed expectation.

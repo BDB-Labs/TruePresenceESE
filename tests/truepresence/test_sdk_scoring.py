@@ -367,6 +367,8 @@ def test_high_risk_low_confidence_does_not_escalate_to_manual_review() -> None:
         "scripted_bot_session",
         "low_evidence_session",
         "contradictory_session",
+        "browser_automation_session",
+        "agentic_like_session",
     ],
 )
 def test_scoring_fixture_feature_packets_are_privacy_safe(fixture_name: str) -> None:

@@ -1,0 +1,91 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_agentic_like",
+    "tenant_id": "default",
+    "typing": {
+      "mean_inter_key_interval_ms": 42,
+      "inter_key_interval_stddev_ms": 4,
+      "characters_per_minute": 850,
+      "correction_count": 0,
+      "correction_rate": 0,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 15,
+      "prompt_render_to_first_input_ms": 20,
+      "typing_duration_ms": 280,
+      "last_input_to_submit_ms": 8
+    },
+    "challenge": {
+      "challenge_type": "reading_comprehension",
+      "response_latency_ms": 80,
+      "expected_reading_time_ms": 5200,
+      "prompt_render_to_first_input_ms": 20,
+      "correction_count": 0,
+      "paste_count": 0,
+      "typing_duration_ms": 280,
+      "submitted_exactly": true
+    },
+    "pointer": {
+      "pointer_entropy": 0.01,
+      "pointer_movement_count": 1,
+      "click_count": 1,
+      "click_hesitation_ms": 1,
+      "scroll_cadence_score": 0.01
+    },
+    "environment": {
+      "webdriver_detected": true,
+      "automation_framework_hint": true,
+      "headless_browser_hint": true,
+      "reduced_motion_enabled": true,
+      "timezone_offset_minutes": 0,
+      "viewport_width": 1280,
+      "viewport_height": 720
+    },
+    "agentic": {
+      "action_burst_count": 8,
+      "mean_burst_interval_ms": 3200,
+      "burst_interval_stddev_ms": 95,
+      "idle_to_action_latency_ms": 70,
+      "exploratory_action_count": 0,
+      "route_directness_score": 0.99,
+      "large_instant_delta_count": 3,
+      "submit_after_instant_input_ms": 140,
+      "structured_retry_count": 4,
+      "validation_repair_count": 3
+    },
+    "session_continuity": {
+      "session_age_ms": 800,
+      "prior_interaction_count": 0,
+      "focus_blur_count": 0,
+      "navigation_count": 0,
+      "same_device_session_count": 0
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 1,
+      "typing_summary": {
+        "delete_key_count": 0,
+        "input_event_count": 4,
+        "last_input_to_submit_ms": 8,
+        "max_inter_key_interval_ms": 47,
+        "min_inter_key_interval_ms": 37,
+        "tracked_field_count": 1
+      }
+    }
+  },
+  "signals": [],
+  "_meta": {
+    "expected_category": "agentic_control",
+    "description": "Agentic-like browser-control fixture: impossible reading time, burst/pause loop, direct route, instant deltas, and low exploration.",
+    "expected": {
+      "class": "agentic_control",
+      "human_presence_likelihood": [0.0, 0.1],
+      "automation_likelihood": [0.55, 0.75],
+      "agentic_control_likelihood": [0.7, 0.9],
+      "confidence": [0.9, 1.0],
+      "recommended_action": ["manual_review"]
+    }
+  }
+}

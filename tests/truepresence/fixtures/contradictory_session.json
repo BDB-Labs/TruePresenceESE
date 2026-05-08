@@ -104,5 +104,17 @@
       "category": "pointer_behavior",
       "explanation": "Derived pointer metrics contain natural hesitation and entropy."
     }
-  ]
+  ],
+  "_meta": {
+    "expected_category": "mixed",
+    "description": "Strong automation and agentic signals coexist with human-like cadence and pointer support. Confidence should be moderated by contradiction.",
+    "expected": {
+      "class": "mixed",
+      "human_presence_likelihood": [0.45, 0.65],
+      "automation_likelihood": [0.35, 0.55],
+      "agentic_control_likelihood": [0.35, 0.55],
+      "confidence": [0.45, 0.65],
+      "recommended_action": ["soft_challenge"]
+    }
+  }
 }

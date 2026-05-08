@@ -15,8 +15,8 @@ so that calibration tests can run against known signal sets without re-running
 detectors.
 
 An optional ``_meta`` object carries human-readable documentation fields
-(``expected_category``, ``description``) that are not forwarded to any SDK
-call.
+(``expected_category``, ``description``) and calibration expectations that
+are not forwarded to any SDK call.
 
 Public API
 ----------

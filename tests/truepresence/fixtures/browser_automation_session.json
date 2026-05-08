@@ -1,0 +1,88 @@
+{
+  "feature_packet": {
+    "surface": "web",
+    "site_id": "calibration_fixture",
+    "session_id": "fixture_browser_automation",
+    "tenant_id": "default",
+    "typing": {
+      "mean_inter_key_interval_ms": 45,
+      "inter_key_interval_stddev_ms": 4,
+      "characters_per_minute": 780,
+      "correction_count": 0,
+      "correction_rate": 0,
+      "paste_count": 0,
+      "focus_to_first_input_ms": 18,
+      "prompt_render_to_first_input_ms": 30,
+      "typing_duration_ms": 420,
+      "last_input_to_submit_ms": 16
+    },
+    "challenge": {
+      "challenge_type": "typing_cadence",
+      "response_latency_ms": 2400,
+      "expected_reading_time_ms": 1900,
+      "prompt_render_to_first_input_ms": 30,
+      "correction_count": 0,
+      "paste_count": 0,
+      "typing_duration_ms": 420,
+      "submitted_exactly": true
+    },
+    "pointer": {
+      "pointer_entropy": 0.03,
+      "pointer_movement_count": 1,
+      "click_count": 1,
+      "click_hesitation_ms": 4,
+      "scroll_cadence_score": 0.02
+    },
+    "environment": {
+      "webdriver_detected": true,
+      "automation_framework_hint": true,
+      "headless_browser_hint": true,
+      "reduced_motion_enabled": true,
+      "timezone_offset_minutes": 0,
+      "viewport_width": 1280,
+      "viewport_height": 720
+    },
+    "session_continuity": {
+      "session_age_ms": 1200,
+      "prior_interaction_count": 0,
+      "focus_blur_count": 0,
+      "navigation_count": 0,
+      "same_device_session_count": 0
+    },
+    "metadata": {
+      "mode": "privacy_preserving",
+      "sdk_version": "0.2.0",
+      "tracked_field_count": 1,
+      "typing_summary": {
+        "delete_key_count": 0,
+        "input_event_count": 6,
+        "last_input_to_submit_ms": 16,
+        "max_inter_key_interval_ms": 49,
+        "min_inter_key_interval_ms": 41,
+        "tracked_field_count": 1
+      }
+    }
+  },
+  "signals": [
+    {
+      "reason_code": "automation_environment_hint",
+      "severity": "medium",
+      "confidence": 0.78,
+      "contribution_target": "automation",
+      "category": "environment",
+      "explanation": "Browser environment aggregates indicate automation tooling."
+    }
+  ],
+  "_meta": {
+    "expected_category": "automation",
+    "description": "Browser automation fixture with webdriver/headless environment aggregates and fast uniform interaction metrics, but no agentic-control feature set.",
+    "expected": {
+      "class": "automation",
+      "human_presence_likelihood": [0.0, 0.2],
+      "automation_likelihood": [0.55, 0.75],
+      "agentic_control_likelihood": [0.0, 0.15],
+      "confidence": [0.75, 1.0],
+      "recommended_action": ["step_up_auth", "manual_review"]
+    }
+  }
+}

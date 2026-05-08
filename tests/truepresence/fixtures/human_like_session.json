@@ -63,5 +63,17 @@
       }
     }
   },
-  "signals": []
+  "signals": [],
+  "_meta": {
+    "expected_category": "human",
+    "description": "Human-like aggregate typing, challenge, pointer, and continuity metrics with no detector signals.",
+    "expected": {
+      "class": "human",
+      "human_presence_likelihood": [0.65, 0.75],
+      "automation_likelihood": [0.0, 0.1],
+      "agentic_control_likelihood": [0.0, 0.1],
+      "confidence": [0.05, 0.2],
+      "recommended_action": ["observe"]
+    }
+  }
 }

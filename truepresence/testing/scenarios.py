@@ -15,7 +15,8 @@ A *scenario* is a complete, repeatable evaluation run:
 Expected ranges
 ---------------
 Each range is a ``(min_inclusive, max_inclusive)`` tuple of floats in [0, 1].
-Omit a field to skip that assertion.
+Omit a field to skip that assertion.  When callers do not provide explicit
+ranges, ``run_scenario`` uses ``_meta.expected`` from the fixture when present.
 
 Example::
 
@@ -68,6 +69,10 @@ class ScenarioResult:
 
     # All signals produced by detectors + fixture pre-computed signals
     all_signals: list[DetectorSignal] = field(default_factory=list)
+
+    # Expected ranges/actions used for this run, from fixture _meta or overrides.
+    expected_ranges: dict[str, FloatRange] = field(default_factory=dict)
+    expected_actions: set[str] = field(default_factory=set)
 
     # Human-readable failure reasons
     failures: list[str] = field(default_factory=list)
@@ -136,6 +141,25 @@ def run_scenario(
     fixture_signals: list[DetectorSignal] = fixture["signals"]
     meta: dict[str, Any] = fixture["meta"]
     name: str = fixture["name"]
+    meta_expected = meta.get("expected", {}) if isinstance(meta.get("expected", {}), dict) else {}
+
+    resolved_expected_human_presence = expected_human_presence or _meta_range(
+        meta_expected,
+        "human_presence_likelihood",
+    )
+    resolved_expected_automation = expected_automation or _meta_range(
+        meta_expected,
+        "automation_likelihood",
+    )
+    resolved_expected_agentic_control = expected_agentic_control or _meta_range(
+        meta_expected,
+        "agentic_control_likelihood",
+    )
+    resolved_expected_confidence = expected_confidence or _meta_range(
+        meta_expected,
+        "confidence",
+    )
+    resolved_expected_action = expected_action or _meta_actions(meta_expected)
 
     # Run detectors to produce fresh signals
     detector_signals = run_human_plausibility_detectors(packet)
@@ -162,6 +186,7 @@ def run_scenario(
 
     effective_category = (
         expected_category
+        or meta_expected.get("class")
         or meta.get("expected_category", "unknown")
     )
 
@@ -170,36 +195,43 @@ def run_scenario(
         expected_category=effective_category,
         response=response,
         all_signals=merged,
+        expected_ranges=_expected_ranges(
+            human_presence=resolved_expected_human_presence,
+            automation=resolved_expected_automation,
+            agentic_control=resolved_expected_agentic_control,
+            confidence=resolved_expected_confidence,
+        ),
+        expected_actions=resolved_expected_action or set(),
     )
 
     # Evaluate assertions
     result.human_presence_pass = _check_range(
         "human_presence_likelihood",
         response.human_presence_likelihood,
-        expected_human_presence,
+        resolved_expected_human_presence,
         result.failures,
     )
     result.automation_pass = _check_range(
         "automation_likelihood",
         response.automation_likelihood,
-        expected_automation,
+        resolved_expected_automation,
         result.failures,
     )
     result.agentic_control_pass = _check_range(
         "agentic_control_likelihood",
         response.agentic_control_likelihood,
-        expected_agentic_control,
+        resolved_expected_agentic_control,
         result.failures,
     )
     result.confidence_pass = _check_range(
         "confidence",
         response.confidence,
-        expected_confidence,
+        resolved_expected_confidence,
         result.failures,
     )
     result.action_pass = _check_action(
         response.recommended_action,
-        expected_action,
+        resolved_expected_action,
         result.failures,
     )
 
@@ -225,6 +257,45 @@ def _check_range(
         f"{label}={value:.4f} is outside expected range [{lo}, {hi}]"
     )
     return False
+
+
+def _meta_range(expected: dict[str, Any], key: str) -> FloatRange | None:
+    raw = expected.get(key)
+    if not isinstance(raw, list | tuple) or len(raw) != 2:
+        return None
+    lower, upper = raw
+    if not isinstance(lower, int | float) or not isinstance(upper, int | float):
+        return None
+    return (float(lower), float(upper))
+
+
+def _meta_actions(expected: dict[str, Any]) -> set[str] | None:
+    raw = expected.get("recommended_action")
+    if isinstance(raw, str):
+        return {raw}
+    if isinstance(raw, list):
+        actions = {item for item in raw if isinstance(item, str)}
+        return actions or None
+    return None
+
+
+def _expected_ranges(
+    *,
+    human_presence: FloatRange | None,
+    automation: FloatRange | None,
+    agentic_control: FloatRange | None,
+    confidence: FloatRange | None,
+) -> dict[str, FloatRange]:
+    ranges: dict[str, FloatRange] = {}
+    if human_presence is not None:
+        ranges["human_presence_likelihood"] = human_presence
+    if automation is not None:
+        ranges["automation_likelihood"] = automation
+    if agentic_control is not None:
+        ranges["agentic_control_likelihood"] = agentic_control
+    if confidence is not None:
+        ranges["confidence"] = confidence
+    return ranges
 
 
 def _check_action(

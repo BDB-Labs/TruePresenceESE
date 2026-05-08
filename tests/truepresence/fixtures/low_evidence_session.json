@@ -33,5 +33,17 @@
       "category": "typing_cadence",
       "explanation": "Sparse aggregate metrics show no corrections, which is weak evidence alone."
     }
-  ]
+  ],
+  "_meta": {
+    "expected_category": "low_evidence",
+    "description": "Sparse derived metrics with one weak zero-correction signal. Confidence should remain capped and action should stay observational.",
+    "expected": {
+      "class": "low_evidence",
+      "human_presence_likelihood": [0.5, 0.65],
+      "automation_likelihood": [0.0, 0.15],
+      "agentic_control_likelihood": [0.0, 0.05],
+      "confidence": [0.2, 0.35],
+      "recommended_action": ["observe"]
+    }
+  }
 }

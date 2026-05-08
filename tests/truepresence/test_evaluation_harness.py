@@ -43,12 +43,25 @@ from truepresence.testing.fixtures import FIXTURE_DIR
 ALL_FIXTURE_NAMES = [
     "human_like_session",
     "scripted_bot_session",
+    "low_evidence_session",
+    "contradictory_session",
+    "browser_automation_session",
+    "agentic_like_session",
     "pasted_response_session",
     "uniform_typing_session",
     "impossible_reading_time_session",
     "playwright_like_session",
     "browser_agent_session",
     "mixed_human_agent_session",
+]
+
+CALIBRATION_FIXTURE_NAMES = [
+    "human_like_session",
+    "scripted_bot_session",
+    "low_evidence_session",
+    "contradictory_session",
+    "browser_automation_session",
+    "agentic_like_session",
 ]
 
 
@@ -70,6 +83,24 @@ def test_list_fixtures_includes_all_harness_fixtures() -> None:
     available = set(list_fixtures(FIXTURE_DIR))
     for name in ALL_FIXTURE_NAMES:
         assert name in available, f"Fixture '{name}' missing from {FIXTURE_DIR}"
+
+
+@pytest.mark.parametrize("name", CALIBRATION_FIXTURE_NAMES)
+def test_calibration_fixture_defines_expected_score_ranges(name: str) -> None:
+    fixture = load_fixture(name)
+    expected = fixture["meta"].get("expected")
+
+    assert expected is not None, f"Fixture '{name}' must define _meta.expected"
+    assert expected["class"] in {"human", "automation", "agentic_control", "mixed", "low_evidence"}
+    assert expected["recommended_action"]
+    for key in [
+        "human_presence_likelihood",
+        "automation_likelihood",
+        "agentic_control_likelihood",
+        "confidence",
+    ]:
+        lower, upper = expected[key]
+        assert 0 <= lower <= upper <= 1, f"{name}.{key} must be a valid [0, 1] range"
 
 
 # ===========================================================================
@@ -235,10 +266,11 @@ def test_build_report_has_required_fields() -> None:
 
     required_keys = {
         "fixture_name",
-        "expected_category",
+        "expected_class",
         "likelihoods",
         "confidence",
         "recommended_action",
+        "expected",
         "passed",
     }
     for key in required_keys:
@@ -247,12 +279,15 @@ def test_build_report_has_required_fields() -> None:
     assert set(report["likelihoods"]) == {
         "human_presence", "automation", "agentic_control"
     }
+    assert set(report["expected"]["likelihoods"]) == {
+        "human_presence", "automation", "agentic_control"
+    }
 
 
 def test_summarise_suite_aggregates_correctly() -> None:
     results = [
-        run_scenario("human_like_session", expected_automation=(0.0, 0.44)),
-        run_scenario("scripted_bot_session", expected_automation=(0.55, 1.0)),
+        run_scenario("human_like_session"),
+        run_scenario("scripted_bot_session"),
     ]
     summary = summarise_suite(results)
 
@@ -261,6 +296,17 @@ def test_summarise_suite_aggregates_correctly() -> None:
     assert isinstance(summary["summary"], str)
     assert "TruePresence Evaluation Suite" in summary["summary"]
     assert len(summary["fixtures"]) == 2
+    assert summary["false_positives"] == 0
+    assert summary["false_negatives"] == 0
+
+
+def test_calibration_fixture_set_passes_expected_ranges() -> None:
+    results = [run_scenario(name) for name in CALIBRATION_FIXTURE_NAMES]
+    summary = summarise_suite(results)
+
+    assert summary["failed"] == 0, summary["summary"]
+    assert summary["false_positives"] == 0
+    assert summary["false_negatives"] == 0
 
 
 def test_summarise_suite_counts_failures_correctly() -> None:
