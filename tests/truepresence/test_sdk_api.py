@@ -7,18 +7,30 @@ Covers standard contracts plus renamed-raw-content rejection at the HTTP layer.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from truepresence.api.server import app as rest_app
+from truepresence.api.server import get_dashboard_user
 from truepresence.evidence.sdk_artifacts import sdk_evidence_store
 
 pytestmark = pytest.mark.sdk
 
 
-def _client() -> TestClient:
+@pytest.fixture(autouse=True)
+def _clear_dashboard_auth_override() -> None:
+    rest_app.dependency_overrides.pop(get_dashboard_user, None)
+    yield
+    rest_app.dependency_overrides.pop(get_dashboard_user, None)
+
+
+def _client(current_user: dict | None = None) -> TestClient:
+    rest_app.dependency_overrides.pop(get_dashboard_user, None)
+    if current_user is not None:
+        rest_app.dependency_overrides[get_dashboard_user] = lambda: current_user
     app = FastAPI()
     app.mount("/api", rest_app)
     return TestClient(app)
@@ -52,6 +64,37 @@ def _valid_payload() -> dict:
             },
         },
     }
+
+
+def _dashboard_user(
+    *,
+    tenant_id: str = "default",
+    role: str = "reviewer",
+) -> dict:
+    return {
+        "id": 1,
+        "email": f"{role}@example.test",
+        "name": role,
+        "role": role,
+        "tenant_id": tenant_id,
+        "active": True,
+    }
+
+
+def _payload_for_tenant(tenant_id: str, session_id: str) -> dict:
+    payload = deepcopy(_valid_payload())
+    payload["session_id"] = session_id
+    payload["tenant_id"] = tenant_id
+    return payload
+
+
+def _create_sdk_evidence(client: TestClient, *, tenant_id: str, session_id: str) -> str:
+    response = client.post(
+        "/api/v1/truepresence/evaluate-interaction",
+        json=_payload_for_tenant(tenant_id, session_id),
+    )
+    assert response.status_code == 200
+    return response.json()["evidence_packet_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +184,7 @@ def test_dashboard_evidence_cards_endpoint_returns_minimized_sdk_fields() -> Non
     evaluation = client.post("/api/v1/truepresence/evaluate-interaction", json=_valid_payload())
     assert evaluation.status_code == 200
 
+    client = _client(_dashboard_user(tenant_id="default"))
     response = client.get("/api/v1/truepresence/evidence/cards?tenant=default")
 
     assert response.status_code == 200
@@ -170,6 +214,104 @@ def test_dashboard_evidence_cards_endpoint_returns_minimized_sdk_fields() -> Non
     assert "message_text" not in body
     assert "caption" not in body
     assert "file_url" not in body
+
+
+def test_dashboard_evidence_cards_reject_unauthenticated_requests() -> None:
+    response = _client().get("/api/v1/truepresence/evidence/cards")
+
+    assert response.status_code in {401, 403}
+
+
+def test_dashboard_evidence_artifact_rejects_unauthenticated_requests() -> None:
+    response = _client().get("/api/v1/truepresence/evidence/ep_unknown")
+
+    assert response.status_code in {401, 403}
+
+
+def test_dashboard_tenant_user_cannot_list_other_tenant_evidence() -> None:
+    sdk_evidence_store.clear()
+    public_client = _client()
+    _create_sdk_evidence(public_client, tenant_id="tenant-b", session_id="tenant-b-session")
+
+    response = _client(_dashboard_user(tenant_id="tenant-a")).get(
+        "/api/v1/truepresence/evidence/cards?tenant=tenant-b"
+    )
+
+    assert response.status_code == 403
+
+
+def test_dashboard_tenant_user_cannot_retrieve_other_tenant_evidence_without_existence_leak() -> None:
+    sdk_evidence_store.clear()
+    public_client = _client()
+    evidence_id = _create_sdk_evidence(
+        public_client,
+        tenant_id="tenant-b",
+        session_id="tenant-b-session",
+    )
+    tenant_a_client = _client(_dashboard_user(tenant_id="tenant-a"))
+
+    forbidden = tenant_a_client.get(f"/api/v1/truepresence/evidence/{evidence_id}")
+    missing = tenant_a_client.get("/api/v1/truepresence/evidence/ep_missing")
+
+    assert forbidden.status_code == 404
+    assert missing.status_code == 404
+    assert forbidden.json() == missing.json()
+
+
+def test_dashboard_tenant_user_can_access_own_evidence() -> None:
+    sdk_evidence_store.clear()
+    public_client = _client()
+    own_evidence_id = _create_sdk_evidence(
+        public_client,
+        tenant_id="tenant-a",
+        session_id="tenant-a-session",
+    )
+    other_evidence_id = _create_sdk_evidence(
+        public_client,
+        tenant_id="tenant-b",
+        session_id="tenant-b-session",
+    )
+
+    tenant_a_client = _client(_dashboard_user(tenant_id="tenant-a"))
+    cards_response = tenant_a_client.get("/api/v1/truepresence/evidence/cards")
+    artifact_response = tenant_a_client.get(f"/api/v1/truepresence/evidence/{own_evidence_id}")
+
+    assert cards_response.status_code == 200
+    cards_payload = cards_response.json()
+    assert cards_payload["tenant_id"] == "tenant-a"
+    returned_ids = {card["evidence_packet_id"] for card in cards_payload["evidence_cards"]}
+    assert own_evidence_id in returned_ids
+    assert other_evidence_id not in returned_ids
+
+    assert artifact_response.status_code == 200
+    artifact = artifact_response.json()
+    assert artifact["tenant_id"] == "tenant-a"
+    assert artifact["evidence_packet_id"] == own_evidence_id
+    artifact_body = json.dumps(artifact)
+    assert "typed_text" not in artifact_body
+    assert "message_text" not in artifact_body
+    assert "caption" not in artifact_body
+    assert "file_url" not in artifact_body
+
+
+def test_dashboard_super_admin_can_access_tenant_evidence() -> None:
+    sdk_evidence_store.clear()
+    public_client = _client()
+    evidence_id = _create_sdk_evidence(
+        public_client,
+        tenant_id="tenant-b",
+        session_id="tenant-b-session",
+    )
+    admin_client = _client(_dashboard_user(tenant_id="admin-tenant", role="super_admin"))
+
+    cards_response = admin_client.get("/api/v1/truepresence/evidence/cards?tenant=tenant-b")
+    artifact_response = admin_client.get(f"/api/v1/truepresence/evidence/{evidence_id}")
+
+    assert cards_response.status_code == 200
+    assert cards_response.json()["tenant_id"] == "tenant-b"
+    assert cards_response.json()["evidence_cards"][0]["evidence_packet_id"] == evidence_id
+    assert artifact_response.status_code == 200
+    assert artifact_response.json()["tenant_id"] == "tenant-b"
 
 
 # ---------------------------------------------------------------------------

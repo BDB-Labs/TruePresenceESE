@@ -40,6 +40,19 @@ Dashboard cards must not display raw content fields, including:
 
 The UI enforces this by normalizing backend payloads into a small card shape before rendering. The SDK dashboard endpoint also returns minimized card records instead of full evidence artifacts, so derived feature summaries and detector traces are not sent to the dashboard view.
 
+## Authentication And Tenant Isolation
+
+Dashboard evidence endpoints require authentication:
+
+- `GET /v1/truepresence/evidence/cards`
+- `GET /v1/truepresence/evidence/{evidence_packet_id}`
+
+Tenant-scoped users can list and retrieve only evidence for their authenticated tenant. The backend derives tenant scope from the authenticated user and does not trust `tenant` or `tenant_id` query parameters by themselves. If a tenant-scoped user asks for another tenant in the card-list query, the request is rejected.
+
+`super_admin` users may list or retrieve evidence across tenants. When an evidence artifact is missing or belongs to another tenant, tenant-scoped users receive the same not-found response so the API does not reveal whether another tenant's evidence ID exists.
+
+The Next.js dashboard proxy at `/api/dashboard/evidence` uses the signed-in dashboard cookie and returns `401` without proxying when the cookie is absent.
+
 ## Backend Configuration
 
 The Next.js API proxy requires `TRUEPRESENCE_API_URL` for server-side backend calls. If it is missing, routes return a clear 503 response:

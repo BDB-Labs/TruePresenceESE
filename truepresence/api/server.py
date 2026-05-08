@@ -3,8 +3,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, ValidationError
 
 from truepresence.core.runtime import (
@@ -31,6 +32,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TruePresence ESE API", version="1.0.0")
+
+dashboard_bearer_scheme = HTTPBearer()
+_DASHBOARD_ADMIN_ROLES = {"admin", "super_admin"}
 
 # Sessions are now managed by the distributed runtime (Redis)
 # removed: SESSIONS = {}
@@ -97,6 +101,50 @@ def _sdk_dashboard_evidence_card(artifact) -> dict[str, Any]:
         "recommended_action": artifact.recommended_action,
         "timestamp": artifact.created_at,
     }
+
+
+def get_dashboard_user(
+    credentials: HTTPAuthorizationCredentials = Depends(dashboard_bearer_scheme),  # noqa: B008
+) -> dict[str, Any]:
+    """Authenticate dashboard evidence requests with the existing JWT user model."""
+    from truepresence.api.auth import get_current_user
+
+    return get_current_user(credentials)
+
+
+def _is_dashboard_admin(user: dict[str, Any]) -> bool:
+    return str(user.get("role") or "").lower() in _DASHBOARD_ADMIN_ROLES
+
+
+def _requested_tenant_id(request: Request) -> str | None:
+    return (
+        request.query_params.get("tenant_id")
+        or request.query_params.get("tenant")
+        or None
+    )
+
+
+def _authorized_listing_tenant(
+    *,
+    request: Request,
+    user: dict[str, Any],
+) -> str | None:
+    requested_tenant = _requested_tenant_id(request)
+    if _is_dashboard_admin(user):
+        return requested_tenant
+
+    user_tenant = user.get("tenant_id")
+    if not user_tenant:
+        raise HTTPException(status_code=403, detail="Tenant access required")
+    if requested_tenant and requested_tenant != user_tenant:
+        raise HTTPException(status_code=403, detail="Tenant access denied")
+    return str(user_tenant)
+
+
+def _can_access_artifact(user: dict[str, Any], artifact) -> bool:
+    if _is_dashboard_admin(user):
+        return True
+    return bool(user.get("tenant_id")) and artifact.tenant_id == user.get("tenant_id")
 
 
 # Exception handlers - CRITICAL: System does NOT fail silently
@@ -335,23 +383,23 @@ async def evaluate_interaction(request: Request):
 def list_sdk_dashboard_evidence_cards(
     request: Request,
     limit: int = Query(default=10, ge=1, le=50),
+    user: dict[str, Any] = Depends(get_dashboard_user),  # noqa: B008
 ):
     """List content-minimized SDK evidence cards for the dashboard."""
-    tenant_id = (
-        request.query_params.get("tenant_id")
-        or request.query_params.get("tenant")
-        or None
-    )
+    tenant_id = _authorized_listing_tenant(request=request, user=user)
     artifacts = sdk_evidence_store.list_recent(tenant_id=tenant_id, limit=limit)
     cards = [_sdk_dashboard_evidence_card(artifact) for artifact in artifacts]
     return {"tenant_id": tenant_id, "count": len(cards), "evidence_cards": cards}
 
 
 @app.get("/v1/truepresence/evidence/{evidence_packet_id}")
-def get_sdk_evidence_artifact(evidence_packet_id: str):
+def get_sdk_evidence_artifact(
+    evidence_packet_id: str,
+    user: dict[str, Any] = Depends(get_dashboard_user),  # noqa: B008
+):
     """Retrieve a content-minimized SDK/web evaluation evidence artifact."""
     artifact = sdk_evidence_store.get(evidence_packet_id)
-    if artifact is None:
+    if artifact is None or not _can_access_artifact(user, artifact):
         raise HTTPException(status_code=404, detail="Evidence artifact not found")
     return artifact.model_dump(mode="json")
 
