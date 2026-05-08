@@ -961,10 +961,58 @@ class TelegramProtectionService:
             return {"status": "failed", "error": "Review not yet resolved by admin"}
             
         admin_decision = review.get("admin_decision")
-        original_message = review.get("original_message", {})
-        user_id = original_message.get("from", {}).get("id")
-        chat_id = original_message.get("chat", {}).get("id")
-        message_id = original_message.get("message_id")
+        if admin_decision == "allow":
+            return {
+                "status": "skipped",
+                "review_id": review_id,
+                "action": admin_decision,
+                "message": "No Telegram action required for decision: allow",
+            }
+        if admin_decision not in {"ban", "kick", "warn", "delete"}:
+            return {
+                "status": "failed",
+                "review_id": review_id,
+                "action": admin_decision,
+                "error": "invalid_admin_decision",
+            }
+
+        original_message = review.get("original_message") or {}
+        telegram_refs = review.get("telegram_refs") or {}
+        user_info = review.get("user_info") or {}
+        chat_info = review.get("chat_info") or {}
+        user_id = (
+            original_message.get("from", {}).get("id")
+            or telegram_refs.get("sender_id")
+            or user_info.get("id")
+        )
+        chat_id = (
+            original_message.get("chat", {}).get("id")
+            or telegram_refs.get("chat_id")
+            or chat_info.get("id")
+        )
+        message_id = original_message.get("message_id") or telegram_refs.get("message_id")
+
+        if admin_decision in {"ban", "kick"} and (not chat_id or not user_id):
+            return {
+                "status": "failed",
+                "review_id": review_id,
+                "action": admin_decision,
+                "error": "missing_chat_or_user_reference",
+            }
+        if admin_decision == "warn" and not chat_id:
+            return {
+                "status": "failed",
+                "review_id": review_id,
+                "action": admin_decision,
+                "error": "missing_chat_reference",
+            }
+        if admin_decision == "delete" and (not chat_id or not message_id):
+            return {
+                "status": "failed",
+                "review_id": review_id,
+                "action": admin_decision,
+                "error": "missing_chat_or_message_reference",
+            }
         
         bot_token = await asyncio.to_thread(self._resolve_token_sync, tenant_id)
         if not bot_token:
@@ -1010,14 +1058,6 @@ class TelegramProtectionService:
                 "message_id": message_id
             }
             
-        else:  # allow or unknown
-            return {
-                "status": "skipped",
-                "review_id": review_id,
-                "action": admin_decision,
-                "message": f"No action required for decision: {admin_decision}"
-            }
-        
         try:
             response = await self._post_telegram_api(url, payload)
             
@@ -1369,15 +1409,15 @@ async def execute_review_decision(review_id: str, request: Request):
         
     result = await service.execute_review_decision(review_id, tenant_id)
     
-    if result["status"] != "executed":
+    if result["status"] not in {"executed", "skipped"}:
         raise HTTPException(status_code=500, detail=result.get("error", "Failed to execute decision"))
         
     return {
-        "status": "executed",
+        "status": result["status"],
         "tenant_id": tenant_id,
         "review_id": review_id,
-        "action": result["action"],
-        "message": result["message"],
+        "action": result.get("action"),
+        "message": result.get("message", ""),
         "telegram_response": result.get("telegram_response")
     }
 

@@ -82,3 +82,77 @@ def test_telegram_review_resolve_uses_router_singleton() -> None:
 
     assert details.status_code == 200
     assert details.json()["status"] == "resolved"
+
+
+def test_telegram_review_execute_allows_metadata_only_refs(monkeypatch) -> None:
+    app = FastAPI()
+    app.dependency_overrides[telegram_bot.require_telegram_admin] = lambda: {"role": "super_admin"}
+    app.include_router(telegram_bot.router)
+    client = TestClient(app)
+    tenant_id = "route-execute-test"
+    captured = {}
+
+    async def fake_post_telegram_api(url, payload):
+        captured["url"] = url
+        captured["payload"] = payload
+
+        class Response:
+            status_code = 200
+            text = "OK"
+
+            def json(self):
+                return {"ok": True}
+
+        return Response()
+
+    monkeypatch.setattr(telegram_bot.service, "_resolve_token_sync", lambda tenant: "token")
+    monkeypatch.setattr(telegram_bot.service, "_post_telegram_api", fake_post_telegram_api)
+
+    review_id = telegram_bot.service.add_pending_review(
+        {
+            "action": {},
+            "evaluation": {"final": {}},
+            "telegram_refs": {
+                "chat_id": -100123,
+                "message_id": 456,
+                "sender_id": 789,
+            },
+        },
+        tenant_id=tenant_id,
+    )
+    resolve = client.post(
+        f"/telegram/reviews/{review_id}/resolve?tenant={tenant_id}",
+        json={"decision": "delete", "notes": "confirmed metadata match"},
+    )
+    assert resolve.status_code == 200
+
+    execute = client.post(f"/telegram/reviews/{review_id}/execute?tenant={tenant_id}")
+
+    assert execute.status_code == 200
+    assert execute.json()["status"] == "executed"
+    assert captured["payload"] == {"chat_id": -100123, "message_id": 456}
+
+
+def test_telegram_review_execute_allow_is_successful_noop() -> None:
+    app = FastAPI()
+    app.dependency_overrides[telegram_bot.require_telegram_admin] = lambda: {"role": "super_admin"}
+    app.include_router(telegram_bot.router)
+    client = TestClient(app)
+    tenant_id = "route-allow-test"
+    review_id = telegram_bot.service.add_pending_review(
+        {
+            "action": {},
+            "evaluation": {"final": {}},
+        },
+        tenant_id=tenant_id,
+    )
+    resolve = client.post(
+        f"/telegram/reviews/{review_id}/resolve?tenant={tenant_id}",
+        json={"decision": "allow", "notes": "false positive"},
+    )
+    assert resolve.status_code == 200
+
+    execute = client.post(f"/telegram/reviews/{review_id}/execute?tenant={tenant_id}")
+
+    assert execute.status_code == 200
+    assert execute.json()["status"] == "skipped"
