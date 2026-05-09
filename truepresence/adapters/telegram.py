@@ -5,6 +5,8 @@ Converts Telegram webhook events into TruePresence evaluation events.
 Includes detection for: Mirrors/Userbots, Crypto Miners, DMCA, Torrents, VNC, Illegal Content
 """
 
+from __future__ import annotations
+
 import logging
 import math
 import re
@@ -609,7 +611,7 @@ class TelegramAdapter:
         recent = list(self._user_message_times.get(user_id, []))
         intervals = [
             max(0.0, (right - left) * 1000)
-            for left, right in zip(recent, recent[1:], strict=False)
+            for left, right in zip(recent, recent[1:])
         ]
         if not intervals:
             return {
@@ -702,7 +704,7 @@ class TelegramAdapter:
         media_times = list(recent)
         intervals = [
             max(0.0, (right - left) * 1000)
-            for left, right in zip(media_times, media_times[1:], strict=False)
+            for left, right in zip(media_times, media_times[1:])
         ]
         return {
             "media_count_window": len(media_times),

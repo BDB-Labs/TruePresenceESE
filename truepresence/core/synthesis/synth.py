@@ -101,7 +101,7 @@ class EnsembleSynthesis:
                 "variance": float(variance),
                 "role_outputs": role_results,
                 "evidence": evidence,
-                "weights_used": {role: float(weight) for role, weight in zip(role_outputs.keys(), weights, strict=False)}
+                "weights_used": {role: float(weight) for role, weight in zip(role_outputs.keys(), weights)}
             }
         except Exception as e:
             logger.error(f"Synthesis FAILED: {e}", exc_info=True)

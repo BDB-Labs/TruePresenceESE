@@ -52,7 +52,7 @@ class AgentCouncil:
         opinions = []
         agent_results = {}
         
-        for agent_name, agent in zip(self.agent_names, self.agents, strict=False):
+        for agent_name, agent in zip(self.agent_names, self.agents):
             try:
                 result = agent.evaluate(evidence, session)
                 # Extract probability or score from agent result

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 
@@ -209,3 +211,145 @@ def test_manual_review_includes_metadata_only_evidence_card() -> None:
 
     assert review["evidence_card"] == evidence_card
     assert secret_text not in json.dumps(review["evidence_card"])
+    assert "message_text" not in review
+    assert "original_message" not in review
+    assert "update" not in review
+
+
+def test_evidence_card_has_required_fields() -> None:
+    card = build_telegram_community_evidence_card(
+        event={
+            "event_type": "message",
+            "timestamp": 1_700_050_000,
+            "context": {
+                "platform": "telegram",
+                "user_id": 1001,
+                "group_id": -2001,
+                "telegram_community": {
+                    "features": {"join_to_first_message_ms": 500, "link_present": True},
+                    "reason_codes": ["instant_post_after_join"],
+                    "detector_signals": [
+                        {
+                            "reason_code": "instant_post_after_join",
+                            "severity": "high",
+                            "confidence": 0.78,
+                            "contribution_target": "automation",
+                            "category": "session_continuity",
+                            "explanation": "A message was posted almost immediately after joining.",
+                        }
+                    ],
+                },
+            },
+        },
+        action={"action": "alert_admin", "confidence": 0.73},
+        evaluation={"final": {"reason_codes": ["instant_post_after_join"]}},
+    )
+
+    assert "risk" in card
+    assert "score" in card["risk"]
+    assert "level" in card["risk"]
+    assert "confidence" in card
+    assert "reason_codes" in card
+    assert "timestamps" in card
+    assert "event_timestamp" in card["timestamps"]
+    assert "created_at" in card["timestamps"]
+    assert "recommended_action" in card
+    assert card["recommended_action"] == "alert_admin"
+    assert card["privacy_boundary"] == "metadata_only_no_content_preview"
+    assert "feature_summaries" in card
+    assert "detector_signals" in card
+    assert "actor_refs" in card
+    assert "surface" in card
+    assert card["surface"] == "telegram"
+    encoded = json.dumps(card)
+    assert "content_preview" not in card
+    assert "message_text" not in encoded
+
+
+def test_coordinated_join_pattern_is_detected() -> None:
+    adapter = TelegramAdapter()
+    chat_id = -2002
+    join_time = 1_700_060_000
+    event = None
+
+    for user_num in range(12):
+        adapter.parse_update(_join_update(2000 + user_num, chat_id, date=join_time))
+        event = adapter.parse_update(
+            _message_update(2000 + user_num, chat_id, join_time + 1, message_id=user_num + 1)
+        )
+
+    community = _community(event)
+    assert community["features"]["joined_within_cluster_count"] >= 10
+    assert "coordinated_join_pattern" in community["reason_codes"]
+
+
+def test_repeat_group_hopping_pattern_is_detected() -> None:
+    adapter = TelegramAdapter()
+    user_id = 3001
+
+    for chat_num in range(6):
+        adapter.parse_update(_join_update(user_id, -3000 - chat_num, date=1_700_070_000 + chat_num))
+        event = adapter.parse_update(
+            _message_update(
+                user_id,
+                -3000 - chat_num,
+                1_700_070_000 + chat_num + 1,
+                message_id=chat_num + 1,
+            )
+        )
+
+    community = _community(event)
+    assert community["features"]["group_hop_count"] >= 5
+    assert "repeat_group_hopping_pattern" in community["reason_codes"]
+
+
+def test_no_message_content_in_review_data() -> None:
+    service = TelegramProtectionService(tenant_id="privacy-review")
+    secret_body = "PRIVACY_SECRET_BODY_MUST_NOT_BE_STORED"
+    evidence_card = {
+        "risk": {"score": 0.65, "level": "medium"},
+        "confidence": 0.65,
+        "reason_codes": ["message_burst_pattern"],
+        "timestamps": {"event_timestamp": 1_700_080_000},
+        "recommended_action": "alert_admin",
+        "feature_summaries": {"message_count_window": 5, "burst_count": 4},
+        "privacy_boundary": "metadata_only_no_content_preview",
+    }
+    action = {
+        "action": "alert_admin",
+        "confidence": 0.65,
+        "evidence_card": evidence_card,
+    }
+    update = {
+        "message": {
+            "message_id": 20,
+            "date": 1_700_080_000,
+            "text": secret_body,
+            "caption": "private caption must not be stored",
+            "photo": [{"file_id": "FILE_ID_SHOULD_NOT_BE_STORED"}],
+            "from": {"id": 5678, "username": "privacy_test"},
+            "chat": {"id": -4001, "title": "Privacy Test"},
+        }
+    }
+    result = {
+        "final": {
+            "threat_categories": [],
+            "risk_factors": ["message_burst_pattern"],
+            "reason_codes": ["message_burst_pattern"],
+        }
+    }
+
+    try:
+        asyncio.run(service._handle_manual_review(action, update, result, tenant_id="privacy-review"))
+        review = service.get_pending_reviews("privacy-review")[0]
+    finally:
+        asyncio.run(service.close())
+
+    encoded = json.dumps(review)
+    assert secret_body not in encoded
+    assert "private caption must not be stored" not in encoded
+    assert "FILE_ID_SHOULD_NOT_BE_STORED" not in encoded
+    assert "message_text" not in review
+    assert "original_message" not in review
+    assert "update" not in review
+    assert review["evidence_card"]["privacy_boundary"] == "metadata_only_no_content_preview"

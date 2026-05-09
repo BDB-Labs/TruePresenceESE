@@ -7,6 +7,8 @@ TruePresence for bot detection and group protection.
 CRITICAL: This system does NOT fail silently.
 """
 
+from __future__ import annotations
+
 import asyncio
 import html
 import json
@@ -1140,15 +1142,23 @@ class TelegramProtectionService:
             else:
                 review_data = {
                     "action": action,
-                    "update": update,
                     "evaluation": result,
                     "evidence_card": evidence_card,
-                    "user_info": source_message.get("from", {}),
-                    "chat_info": source_message.get("chat", {}),
-                    "message_text": source_message.get("text", ""),
+                    "user_info": {
+                        "id": source_message.get("from", {}).get("id"),
+                        "username": source_message.get("from", {}).get("username"),
+                    },
+                    "chat_info": {
+                        "id": source_message.get("chat", {}).get("id"),
+                        "title": source_message.get("chat", {}).get("title"),
+                    },
+                    "telegram_refs": {
+                        "chat_id": source_message.get("chat", {}).get("id"),
+                        "message_id": source_message.get("message_id"),
+                        "sender_id": source_message.get("from", {}).get("id"),
+                    },
                     "threat_categories": result["final"].get("threat_categories", []),
                     "risk_factors": result["final"].get("risk_factors", []),
-                    "original_message": source_message,
                 }
             
             # Add to pending reviews (tenant-isolated)

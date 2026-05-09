@@ -5,6 +5,8 @@ PostgreSQL connection and schema management.
 DATABASE_URL is injected automatically by Railway when Postgres is added.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from contextlib import contextmanager
