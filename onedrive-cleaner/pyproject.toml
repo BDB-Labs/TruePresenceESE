@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "onedrive-screenshot-cleaner"
+version = "1.0.0"
+description = "Scan OneDrive for screenshots and chat screenshots, review and archive them"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit",
+    "requests",
+    "msal",
+    "pillow",
+    "pytesseract",
+    "python-dotenv",
+]
+
+[project.scripts]
+onedrive-cleaner = "onedrive_cleaner.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["onedrive_cleaner*"]
