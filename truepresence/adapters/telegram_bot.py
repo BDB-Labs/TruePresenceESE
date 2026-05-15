@@ -25,6 +25,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from truepresence.adapters.telegram import TelegramAdapter
+from truepresence.api.auth import ROLE_HIERARCHY, get_current_user  # [M-08] moved from deferred request-time import
 from truepresence.core.runtime import (
     decision_engine as shared_decision_engine,
 )
@@ -176,8 +177,10 @@ def require_telegram_admin(
     if credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    from truepresence.api.auth import ROLE_HIERARCHY, get_current_user
-
+    # [M-08] ROLE_HIERARCHY and get_current_user are now imported at module level (top of file).
+    # If a circular import ever resurfaces between this module and truepresence.api.auth,
+    # the resolution is to extract shared auth types into truepresence/auth_types.py rather
+    # than reverting to a deferred import.
     user = get_current_user(credentials)
     if ROLE_HIERARCHY.get(user.get("role"), 0) < ROLE_HIERARCHY["super_admin"]:
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -198,7 +201,7 @@ class TelegramProtectionService:
         orchestrator: Any = None, 
         decision_engine: Any = None
     ):
-        logger.info(f"Initializing TelegramProtectionService for tenant: {tenant_id}")
+        logger.info("Initializing TelegramProtectionService for tenant: %s", tenant_id)
 
         self.tenant_id = tenant_id
         self.orchestrator = orchestrator or shared_orchestrator  # shared across all entry points
@@ -392,9 +395,15 @@ class TelegramProtectionService:
                 try:
                     config["response_thresholds"][threshold] = float(os.environ[var])
                 except (ValueError, TypeError):
-                    logger.warning(f"Invalid threshold value for {var}: {os.environ[var]}")
+                    logger.warning("Invalid threshold value for %s: %s", var, os.environ[var])
         
-        logger.info(f"Loaded configuration for tenant {tenant_id}: {config}")
+        # [M-07] Log only config key names — never values — to prevent tenant security
+        # thresholds and feature flags from being captured by log aggregation systems.
+        logger.info(
+            "Loaded configuration for tenant %s (keys: %s)",
+            tenant_id,
+            list(config.keys()),
+        )
         return config
 
     def _apply_enforcement_mode(self, action: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
@@ -595,11 +604,11 @@ class TelegramProtectionService:
                 if dist and dist.available:
                     session_id = f"tg_{tenant_id}_{user_id}"
                     dist.update_session_field(session_id, "enforcement_outcome", outcome)
-                    logger.info(f"[{tenant_id}] Evidence loop closed: Outcome logged for {session_id}")
+                    logger.info("[%s] Evidence loop closed: Outcome logged for %s", tenant_id, session_id)
 
             return outcome
         except Exception as e:
-            logger.error(f"Execution failed: {e}", exc_info=True)
+            logger.error("Execution failed: %s", e, exc_info=True)
             return {"status": "error", "error": str(e)}
 
     async def process_update(self, update: Dict[str, Any], tenant_id: str = None) -> Optional[Dict[str, Any]]:
@@ -616,10 +625,15 @@ class TelegramProtectionService:
             event = adapter.parse_update(update)
             
             if not event:
-                logger.debug(f"[{tenant_id}] No relevant event to process")
+                logger.debug("[%s] No relevant event to process", tenant_id)
                 return None
             
-            logger.info(f"[{tenant_id}] Processing {event['event_type']} from user {event['context'].get('user_id')}")
+            logger.info(
+                "[%s] Processing %s from user %s",
+                tenant_id,
+                event['event_type'],
+                event['context'].get('user_id'),
+            )
             
             # Get or create session for this user (tenant-isolated)
             user_id = event["context"].get("user_id", "unknown")
@@ -663,7 +677,12 @@ class TelegramProtectionService:
             action = self._apply_telegram_community_recommendation(action, event)
             action = self._apply_enforcement_mode(action, tenant_id)
             
-            logger.info(f"[{tenant_id}] Decision: {action['action']} (confidence: {action.get('confidence', 0):.2f})")
+            logger.info(
+                "[%s] Decision: %s (confidence: %.2f)",
+                tenant_id,
+                action['action'],
+                action.get('confidence', 0),
+            )
             
             # Add full result context for debugging
             action["evaluation"] = {
@@ -702,10 +721,10 @@ class TelegramProtectionService:
             return action
             
         except TruePresenceError as e:
-            logger.error(f"[{tenant_id}] TruePresence error: {e.message}", exc_info=True)
+            logger.error("[%s] TruePresence error: %s", tenant_id, e.message, exc_info=True)
             raise
         except Exception as e:
-            logger.critical(f"[{tenant_id}] UNHANDLED ERROR: {e}", exc_info=True)
+            logger.critical("[%s] UNHANDLED ERROR: %s", tenant_id, e, exc_info=True)
             raise
     
     async def register_group(self, group_id: int, admin_chat_id: int = None, tenant_id: str = None):
@@ -730,7 +749,7 @@ class TelegramProtectionService:
                         )
         try:
             await asyncio.to_thread(_sync_reg)
-            logger.info(f"[{tenant_id}] Registered group {group_id} for protection in DB")
+            logger.info("[%s] Registered group %s for protection in DB", tenant_id, group_id)
         except Exception as exc:
             logger.warning("[%s] Group DB registration unavailable; using in-memory registration: %s", tenant_id, exc)
 
@@ -1027,7 +1046,6 @@ class TelegramProtectionService:
         
         # Execute the appropriate Telegram API action
         if admin_decision == "ban":
-            # Ban user from chat
             url = f"https://api.telegram.org/bot{bot_token}/banChatMember"
             payload = {
                 "chat_id": chat_id,
@@ -1035,7 +1053,6 @@ class TelegramProtectionService:
             }
             
         elif admin_decision == "kick":
-            # Kick user from chat (ban for 1 minute)
             url = f"https://api.telegram.org/bot{bot_token}/banChatMember"
             payload = {
                 "chat_id": chat_id,
@@ -1044,7 +1061,6 @@ class TelegramProtectionService:
             }
             
         elif admin_decision == "warn":
-            # Send warning message
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             payload = {
                 "chat_id": chat_id,
@@ -1053,7 +1069,6 @@ class TelegramProtectionService:
             }
             
         elif admin_decision == "delete":
-            # Delete the message
             url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
             payload = {
                 "chat_id": chat_id,
@@ -1073,7 +1088,7 @@ class TelegramProtectionService:
                     "error": error_msg
                 }
                 
-            logger.info(f"Successfully executed {admin_decision} for user {user_id} in chat {chat_id}")
+            logger.info("Successfully executed %s for user %s in chat %s", admin_decision, user_id, chat_id)
             
             return {
                 "status": "executed",
@@ -1084,7 +1099,7 @@ class TelegramProtectionService:
             }
             
         except Exception as e:
-            logger.error(f"Failed to execute {admin_decision}: {e}", exc_info=True)
+            logger.error("Failed to execute %s: %s", admin_decision, e, exc_info=True)
             return {
                 "status": "failed",
                 "review_id": review_id,
@@ -1171,10 +1186,10 @@ class TelegramProtectionService:
                 
             await asyncio.gather(*notification_tasks)
             
-            logger.info(f"[{tenant_id}] Manual review created: {review_id}")
+            logger.info("[%s] Manual review created: %s", tenant_id, review_id)
             
         except Exception as e:
-            logger.error(f"[{tenant_id}] Failed to create manual review: {e}", exc_info=True)
+            logger.error("[%s] Failed to create manual review: %s", tenant_id, e, exc_info=True)
 
     async def _notify_admin(self, admin_chat_id: int, review_data: Dict[str, Any], review_id: str, tenant_id: str = None):
         """Notify admin about a case requiring manual review."""
@@ -1183,7 +1198,7 @@ class TelegramProtectionService:
         try:
             bot_token = await asyncio.to_thread(self._resolve_token_sync, tenant_id)
             if not bot_token:
-                logger.warning(f"[{tenant_id}] TELEGRAM_BOT_TOKEN not set, cannot send admin notifications")
+                logger.warning("[%s] TELEGRAM_BOT_TOKEN not set, cannot send admin notifications", tenant_id)
                 return
             
             user_info = review_data["user_info"]
@@ -1216,12 +1231,12 @@ class TelegramProtectionService:
             response = await self._post_telegram_api(url, payload)
             
             if response.status_code != 200:
-                logger.error(f"[{tenant_id}] Failed to send Telegram notification: {response.text}")
+                logger.error("[%s] Failed to send Telegram notification: %s", tenant_id, response.text)
             else:
-                logger.info(f"[{tenant_id}] Admin notification sent to chat {admin_chat_id}")
+                logger.info("[%s] Admin notification sent to chat %s", tenant_id, admin_chat_id)
                 
         except Exception as e:
-            logger.error(f"[{tenant_id}] Failed to notify admin {admin_chat_id}: {e}", exc_info=True)
+            logger.error("[%s] Failed to notify admin %s: %s", tenant_id, admin_chat_id, e, exc_info=True)
 
 
 # Initialize service
@@ -1250,7 +1265,7 @@ async def telegram_webhook_for_tenant(request: Request):
     _verify_webhook_secret(request, tenant_id)
     update = await request.json()
 
-    logger.info(f"[{tenant_id}] Received Telegram update: {update.get('update_id')}")
+    logger.info("[%s] Received Telegram update: %s", tenant_id, update.get('update_id'))
     action = await service.process_update(update, tenant_id=tenant_id)
 
     if not action:
@@ -1284,7 +1299,7 @@ async def telegram_webhook(bot_token: str, request: Request):
         tenant_service = get_service_for_tenant(tenant_id)
         _verify_webhook_secret(request, tenant_id)
         
-        logger.info(f"[{tenant_id}] Received Telegram update: {update.get('update_id')}")
+        logger.info("[%s] Received Telegram update: %s", tenant_id, update.get('update_id'))
         
         # Use the module-level singleton — NOT a fresh instance per request
         action = await tenant_service.process_update(update, tenant_id=tenant_id)
@@ -1305,7 +1320,7 @@ async def telegram_webhook(bot_token: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Webhook error: {e}", exc_info=True)
+        logger.error("Webhook error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Telegram webhook processing failed") from e
 
 
@@ -1543,6 +1558,6 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", "8000"))
     
-    logger.info(f"Starting TruePresence Telegram Protection on port {port}")
+    logger.info("Starting TruePresence Telegram Protection on port %s", port)
     
     uvicorn.run(app, host="0.0.0.0", port=port)
