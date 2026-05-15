@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 def _redis_url() -> str:
     return os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 ALGORITHM = "HS256"
@@ -61,14 +62,45 @@ def _allow_dev_jwt_fallback() -> bool:
 
 
 def resolve_jwt_secret() -> str:
+    """Resolve the JWT signing secret from environment variables.
+
+    Precedence:
+      1. JWT_SECRET  (preferred)
+      2. SECRET_KEY  (legacy compatibility)
+      3. Dev fallback — only when TRUEPRESENCE_ENV=development AND
+         TRUEPRESENCE_ALLOW_DEV_AUTH=true are both explicitly set.
+
+    Raises RuntimeError in any non-development environment if no secret
+    is configured, preventing accidental deployment with a known key.
+    """
+    # Preferred env var
     secret = os.environ.get("JWT_SECRET")
     if secret:
         return secret
+
+    # Legacy fallback: SECRET_KEY (backward compatibility)
+    secret = os.environ.get("SECRET_KEY")
+    if secret:
+        logger.warning(
+            "JWT_SECRET not set; falling back to SECRET_KEY. "
+            "Set JWT_SECRET to silence this warning."
+        )
+        return secret
+
+    # Explicit development-only fallback
     if _allow_dev_jwt_fallback():
-        logger.warning("JWT_SECRET missing; using explicit development fallback secret")
+        logger.warning(
+            "JWT_SECRET and SECRET_KEY are both missing; "
+            "using explicit development fallback secret. "
+            "Never set TRUEPRESENCE_ALLOW_DEV_AUTH in production."
+        )
         return DEV_FALLBACK_SECRET
+
     raise RuntimeError(
-        "JWT_SECRET is required. Enable TRUEPRESENCE_ALLOW_DEV_AUTH in explicit development mode only."
+        "JWT signing secret is required but not configured. "
+        "Set the JWT_SECRET environment variable. "
+        "For development only, also set TRUEPRESENCE_ALLOW_DEV_AUTH=true "
+        "with TRUEPRESENCE_ENV=development."
     )
 
 
@@ -85,7 +117,9 @@ bearer_scheme = HTTPBearer()
 def _hash_password_fallback(password: str) -> str:
     salt = secrets.token_hex(16)
     iterations = 600_000
-    derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    derived = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations
+    )
     return f"pbkdf2_sha256${iterations}${salt}${derived.hex()}"
 
 
@@ -96,7 +130,9 @@ def _verify_password_fallback(plain: str, hashed: str) -> bool:
         return False
     if scheme != "pbkdf2_sha256":
         return False
-    derived = hashlib.pbkdf2_hmac("sha256", plain.encode("utf-8"), salt.encode("utf-8"), int(iteration_text))
+    derived = hashlib.pbkdf2_hmac(
+        "sha256", plain.encode("utf-8"), salt.encode("utf-8"), int(iteration_text)
+    )
     return hmac.compare_digest(derived.hex(), digest)
 
 
@@ -166,6 +202,7 @@ def decode_token(token: str) -> dict:
 
 
 def _load_current_user_record(user_id: str) -> Dict[str, Any]:
+    """Load user from Redis cache, falling back to the database."""
     # Try cache first
     try:
         dist = DistributedRuntime(redis_url=_redis_url())
@@ -186,7 +223,9 @@ def _load_current_user_record(user_id: str) -> Dict[str, Any]:
                 user = cur.fetchone()
     except Exception as exc:
         logger.error("Failed to load current user from database", exc_info=True)
-        raise HTTPException(status_code=503, detail="Authentication backend unavailable") from exc
+        raise HTTPException(
+            status_code=503, detail="Authentication backend unavailable"
+        ) from exc
 
     if not user:
         raise HTTPException(status_code=401, detail="User is no longer valid")
@@ -195,7 +234,7 @@ def _load_current_user_record(user_id: str) -> Dict[str, Any]:
 
     user_dict = dict(user)
 
-    # Store in cache for 1 hour
+    # Store in cache for reuse; non-fatal if Redis is unavailable
     try:
         dist = DistributedRuntime(redis_url=_redis_url())
         dist.store_session(f"user_cache:{user_id}", user_dict)
@@ -205,7 +244,10 @@ def _load_current_user_record(user_id: str) -> Dict[str, Any]:
     return user_dict
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:  # noqa: B008
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),  # noqa: B008
+) -> dict:
+    """Validate bearer token and return the authenticated user record."""
     claims = decode_token(credentials.credentials)
     user = _load_current_user_record(claims.get("sub", ""))
 
@@ -217,7 +259,14 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
     return user
 
 
-    """Only the platform super_admin role may manage auth directory users."""
+def require_super_admin(
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> dict:
+    """FastAPI dependency: allow only the platform super_admin role.
+
+    Used as a guard on user management routes. Raises 403 for any role
+    below super_admin.
+    """
     if user.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin access required")
     return user
@@ -270,14 +319,18 @@ def get_me(user: dict = Depends(get_current_user)):  # noqa: B008
 def create_user(request: CreateUserRequest):
     """Create a new user — super_admin only."""
     if request.role not in ROLE_HIERARCHY:
-        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {list(ROLE_HIERARCHY.keys())}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role. Must be one of: {list(ROLE_HIERARCHY.keys())}",
+        )
 
     with get_db() as conn:
         with conn.cursor() as cur:
             try:
                 cur.execute(
                     """INSERT INTO users (email, name, password, role, tenant_id)
-                       VALUES (%s, %s, %s, %s, %s) RETURNING id, email, name, role, tenant_id, created_at""",
+                       VALUES (%s, %s, %s, %s, %s)
+                       RETURNING id, email, name, role, tenant_id, created_at""",
                     (
                         request.email.lower(),
                         request.name,
@@ -289,7 +342,9 @@ def create_user(request: CreateUserRequest):
                 new_user = cur.fetchone()
             except Exception as exc:
                 if "unique" in str(exc).lower():
-                    raise HTTPException(status_code=409, detail="Email already exists") from exc
+                    raise HTTPException(
+                        status_code=409, detail="Email already exists"
+                    ) from exc
                 raise
 
     logger.info("Created user: %s (%s)", new_user["email"], new_user["role"])
@@ -302,7 +357,8 @@ def list_users():
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, email, name, role, tenant_id, active, created_at, last_login FROM users ORDER BY created_at DESC"
+                "SELECT id, email, name, role, tenant_id, active, created_at, last_login "
+                "FROM users ORDER BY created_at DESC"
             )
             return cur.fetchall()
 
@@ -316,13 +372,14 @@ def update_user(user_id: int, request: UpdateUserRequest):
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    # Filter to only valid columns
     fields = {k: v for k, v in fields.items() if k in VALID_USER_COLUMNS}
     if not fields:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
     if "role" in fields and fields["role"] not in ROLE_HIERARCHY:
-        raise HTTPException(status_code=400, detail=f"Invalid role: {fields['role']}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid role: {fields['role']}"
+        )
 
     set_clause = ", ".join(f"{k} = %s" for k in fields)
     values = list(fields.values()) + [user_id]
@@ -330,7 +387,8 @@ def update_user(user_id: int, request: UpdateUserRequest):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE users SET {set_clause} WHERE id = %s RETURNING id, email, name, role, active, tenant_id",
+                f"UPDATE users SET {set_clause} WHERE id = %s "
+                "RETURNING id, email, name, role, active, tenant_id",
                 values,
             )
             updated = cur.fetchone()
@@ -340,9 +398,13 @@ def update_user(user_id: int, request: UpdateUserRequest):
 
     # Invalidate cache
     try:
-        DistributedRuntime(redis_url=_redis_url()).delete_session(f"user_cache:{user_id}")
+        DistributedRuntime(redis_url=_redis_url()).delete_session(
+            f"user_cache:{user_id}"
+        )
     except Exception as exc:
-        logger.warning("Failed to invalidate user cache after update (non-fatal): %s", exc)
+        logger.warning(
+            "Failed to invalidate user cache after update (non-fatal): %s", exc
+        )
 
     return dict(updated)
 
@@ -363,9 +425,13 @@ def deactivate_user(user_id: int):
 
     # Invalidate cache
     try:
-        DistributedRuntime(redis_url=_redis_url()).delete_session(f"user_cache:{user_id}")
+        DistributedRuntime(redis_url=_redis_url()).delete_session(
+            f"user_cache:{user_id}"
+        )
     except Exception as exc:
-        logger.warning("Failed to invalidate user cache after deactivation (non-fatal): %s", exc)
+        logger.warning(
+            "Failed to invalidate user cache after deactivation (non-fatal): %s", exc
+        )
 
     logger.info("Deactivated user: %s", user["email"])
     return {"status": "deactivated", "user_id": user_id}
