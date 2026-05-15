@@ -4,7 +4,7 @@ The TruePresence dashboard displays operational evidence as minimized cards. The
 
 ## Card Types
 
-- **Web SDK evaluations** come from `/v1/truepresence/evidence/cards`, proxied by the UI at `/api/dashboard/evidence`. These cards are built from SDK evidence artifacts and include only the dashboard-safe fields.
+- **Web SDK evaluations** come from `GET /api/v1/truepresence/evidence/cards`, proxied by the UI at `/api/dashboard/evidence`. These cards are built from SDK evidence artifacts and include only the dashboard-safe fields.
 - **Telegram evaluations** come from pending Telegram review payloads. The dashboard extracts only the evidence card, decision IDs, likelihood-style decision probabilities, reason codes, recommended action, and timestamps.
 - **Safety escalations** are separated from standard Telegram evaluations when safety evidence is present. The dashboard shows the safety risk label, reason codes, recommended action, confidence, and timestamp.
 
@@ -55,8 +55,8 @@ instead of crashing or displaying free-form artifact fields.
 
 Dashboard evidence endpoints require authentication:
 
-- `GET /v1/truepresence/evidence/cards`
-- `GET /v1/truepresence/evidence/{evidence_packet_id}`
+- `GET /api/v1/truepresence/evidence/cards`
+- `GET /api/v1/truepresence/evidence/{evidence_packet_id}`
 
 Tenant-scoped users can list and retrieve only evidence for their authenticated tenant. The backend derives tenant scope from the authenticated user and does not trust `tenant` or `tenant_id` query parameters by themselves. If a tenant-scoped user asks for another tenant in the card-list query, the request is rejected.
 

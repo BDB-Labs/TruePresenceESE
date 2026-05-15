@@ -109,7 +109,7 @@ def init_db():
         email       VARCHAR(255) UNIQUE NOT NULL,
         name        VARCHAR(255) NOT NULL,
         password    VARCHAR(255) NOT NULL,
-        role        VARCHAR(50)  NOT NULL DEFAULT 'reviewer' CHECK (role IN ('super_admin', 'reviewer', 'observer')),
+        role        VARCHAR(50)  NOT NULL DEFAULT 'reviewer' CHECK (role IN ('super_admin', 'admin', 'reviewer', 'observer')),
         tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
         active      BOOLEAN      NOT NULL DEFAULT TRUE,
         created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),

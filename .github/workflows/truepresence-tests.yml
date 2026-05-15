@@ -35,20 +35,8 @@ jobs:
         working-directory: truepresence/ui
         run: npm ci
 
-      - name: Run focused SDK tests
-        run: >
-          uv run pytest
-          tests/truepresence/test_sdk_api.py
-          tests/truepresence/test_sdk_privacy.py
-          tests/truepresence/test_sdk_scoring.py
-          -q
-
-      - name: Run Telegram guardrail tests
-        run: >
-          uv run pytest
-          tests/test_truepresence_architecture.py
-          tests/truepresence/test_telegram_*.py
-          -q
+      - name: Run TruePresence Python tests
+        run: uv run pytest tests/truepresence/ tests/test_truepresence_architecture.py -q
 
       - name: Run browser SDK tests
         run: node --test tests/browser-sdk/truepresence-browser-sdk.test.mjs

@@ -13,6 +13,7 @@ readiness.
 | `TELEGRAM_BOT_TOKEN` | Yes | Default tenant bot token from BotFather. Per-tenant variants use `TELEGRAM_BOT_TOKEN_<TENANT>`. |
 | `TELEGRAM_WEBHOOK_SECRET` | Yes | Secret token Telegram must send in `X-Telegram-Bot-Api-Secret-Token`. |
 | `TRUEPRESENCE_ENCRYPTION_KEY` | Yes | Fernet key used when storing Telegram bot tokens through `/telegram/tokens`. |
+| `TRUEPRESENCE_LEGACY_REST_TOKEN` | Yes | Protects legacy REST (`/api/session/create`, `/api/v1/evaluate`, cluster/reset). Clients send `X-TruePresence-Service-Token` or a dashboard JWT. |
 | `BASE_URL` | Yes | Public HTTPS origin used when configuring Telegram webhooks. |
 | `PORT` | No | Platform-provided port. Defaults to `8000`. |
 | `REDIS_URL` | No | Enables distributed session/cache storage. If set, `/ready` requires Redis to be reachable. |
@@ -95,7 +96,7 @@ when PostgreSQL is unavailable, or when Redis is configured but unavailable.
 - [ ] Initial admin user has been seeded.
 - [ ] `TELEGRAM_BOT_TOKEN` or tenant-specific bot tokens are set.
 - [ ] `TELEGRAM_WEBHOOK_SECRET` is set and passed to Telegram.
-- [ ] `TRUEPRESENCE_ENCRYPTION_KEY` is set before storing bot tokens.
+- [ ] `TRUEPRESENCE_LEGACY_REST_TOKEN` is set so legacy REST routes are not anonymously callable.
 - [ ] `/health` returns diagnostics.
 - [ ] `/ready` returns HTTP 200.
 - [ ] Telegram `getWebhookInfo` shows the expected webhook URL and no delivery errors.

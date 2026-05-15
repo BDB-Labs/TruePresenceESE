@@ -55,10 +55,18 @@ class DistributedRuntime:
                 logger.warning(f"Could not connect to Redis: {e}")
                 self.redis_client = None
                 self.available = False
+                self.pool = None
         else:
             logger.warning("Redis package not available. Using in-memory fallback.")
             self.redis_client = None
             self.available = False
+            self.pool = None
+
+    def disconnect_pool(self) -> None:
+        """Release Redis connections held by this runtime's pool."""
+        pool = getattr(self, "pool", None)
+        if pool is not None:
+            pool.disconnect(inuse_connections=True)
 
     def _get_session_key(self, session_id: str) -> str:
         """Generate Redis key for session."""

@@ -44,6 +44,12 @@ curl http://127.0.0.1:8000/api/health
 The development mode above is only for local startup checks. Production must set
 `JWT_SECRET`.
 
+### Legacy REST routes (`/api/session/create`, `/api/v1/evaluate`, cluster, reset)
+
+In production, set `TRUEPRESENCE_LEGACY_REST_TOKEN` to a long random secret. Clients must send the same value in the `X-TruePresence-Service-Token` header, or authenticate with `Authorization: Bearer` using a dashboard JWT. Browser-facing integrations should prefer `POST /api/v1/truepresence/evaluate-interaction`, which remains rate-limited for anonymous SDK use.
+
+When `TRUEPRESENCE_LEGACY_REST_TOKEN` is unset and the server is **not** in production mode, legacy routes stay open for local development and automated tests.
+
 ## Persistent Local Backend
 
 Use Postgres when you need login, admin users, persistent Telegram sessions, or

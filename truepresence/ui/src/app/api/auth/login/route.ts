@@ -18,7 +18,13 @@ export async function POST(request: Request) {
     return missingBackendConfigResponse();
   }
 
-  const credentials = await request.json();
+  let credentials: Record<string, unknown>;
+  try {
+    credentials = await request.json();
+  } catch {
+    return NextResponse.json({ detail: "Request body must be valid JSON" }, { status: 400 });
+  }
+
   let upstream: Response;
   try {
     upstream = await fetch(`${baseUrl}/auth/login`, {

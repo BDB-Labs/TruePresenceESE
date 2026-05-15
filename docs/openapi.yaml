@@ -19,8 +19,9 @@ info:
     
     ## Authentication
     
-    Currently uses session-based authentication via `session_id` parameter.
-    Future versions will include API key authentication.
+    Currently uses session-based authentication via `session_id` parameter for WebSocket flows.
+    Legacy REST endpoints under `/api` accept `X-TruePresence-Service-Token` when
+    `TRUEPRESENCE_LEGACY_REST_TOKEN` is configured, or `Authorization: Bearer` JWT for dashboard users.
   version: 1.0.0
   contact:
     name: BDB-Labs
@@ -36,7 +37,7 @@ servers:
     description: Production server
 
 paths:
-  /session/create:
+  /api/session/create:
     post:
       summary: Create a new session
       description: Create a new TruePresence session for tracking user behavior
@@ -68,7 +69,7 @@ paths:
                   assurance_level:
                     type: string
 
-  /v1/evaluate:
+  /api/v1/evaluate:
     post:
       summary: Evaluate event for bot detection
       description: |
@@ -94,7 +95,7 @@ paths:
         '422':
           description: Validation error
 
-  /health:
+  /api/health:
     get:
       summary: Health check
       description: Check API and orchestrator health status
@@ -113,7 +114,7 @@ paths:
                   orchestrator:
                     type: object
 
-  /v1/sessions/{session_id}/cluster:
+  /api/v1/sessions/{session_id}/cluster:
     get:
       summary: Get session cluster
       description: Get all connected sessions in the identity graph
@@ -140,7 +141,7 @@ paths:
                     items:
                       type: string
 
-  /v1/sessions/{session_id}/reset:
+  /api/v1/sessions/{session_id}/reset:
     post:
       summary: Reset session
       description: Reset session memory and start fresh
