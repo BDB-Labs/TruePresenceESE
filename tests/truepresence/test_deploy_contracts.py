@@ -69,6 +69,7 @@ def test_deployment_readme_lists_required_production_environment() -> None:
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_WEBHOOK_SECRET",
         "TRUEPRESENCE_ENCRYPTION_KEY",
+        "TRUEPRESENCE_LEGACY_REST_TOKEN",
     ]:
         assert variable in readme
 

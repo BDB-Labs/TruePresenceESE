@@ -9,7 +9,11 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, ValidationError
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
+from truepresence.api.legacy_rest_auth import require_legacy_rest_auth
+from truepresence.api.rate_limit import limiter as http_limiter
 from truepresence.core.runtime import (
     decision_engine as shared_decision_engine,
 )
@@ -25,6 +29,7 @@ from truepresence.sdk.contracts import (
 )
 from truepresence.sdk.evaluation import evaluate_interaction_request
 from truepresence.sdk.privacy import RawContentRejected, ensure_privacy_safe_payload
+from truepresence.runtime.health import dependency_components_status
 
 # Configure logging - CRITICAL systems must log
 logging.basicConfig(
@@ -34,6 +39,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TruePresence ESE API", version="1.0.0")
+app.state.limiter = http_limiter
+app.add_middleware(SlowAPIMiddleware)
 
 dashboard_bearer_scheme = HTTPBearer()
 _DASHBOARD_ADMIN_ROLES = {"admin", "super_admin"}
@@ -149,6 +156,14 @@ def _can_access_artifact(user: dict[str, Any], artifact) -> bool:
     return bool(user.get("tenant_id")) and artifact.tenant_id == user.get("tenant_id")
 
 
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Please try again later."},
+    )
+
+
 # Exception handlers - CRITICAL: System does NOT fail silently
 @app.exception_handler(TruePresenceError)
 async def truepresence_exception_handler(request, exc: TruePresenceError):
@@ -235,7 +250,11 @@ class EvaluateResponse(BaseModel):
 
 
 @app.post("/session/create")
-def create_session(request: Optional[CreateSessionRequest] = None, assurance_level: Optional[str] = None):
+def create_session(
+    request: Optional[CreateSessionRequest] = None,
+    assurance_level: Optional[str] = None,
+    _legacy: dict | None = Depends(require_legacy_rest_auth),
+):
     """Create a new session."""
     resolved_assurance_level = assurance_level or (request.assurance_level if request else "A1")
     session_id = str(uuid.uuid4())
@@ -256,7 +275,10 @@ def create_session(request: Optional[CreateSessionRequest] = None, assurance_lev
 
 
 @app.post("/v1/evaluate", response_model=EvaluateResponse)
-def evaluate(request: EvaluateRequest):
+def evaluate(
+    request: EvaluateRequest,
+    _legacy: dict | None = Depends(require_legacy_rest_auth),
+):
     """
     Unified API endpoint for TruePresence evaluation.
     
@@ -363,6 +385,7 @@ def evaluate(request: EvaluateRequest):
     "/v1/truepresence/evaluate-interaction",
     response_model=TruePresenceEvaluationResponse,
 )
+@http_limiter.limit("240/minute")
 async def evaluate_interaction(request: Request):
     """Evaluate privacy-preserving web interaction features without Telegram."""
     try:
@@ -408,38 +431,59 @@ def get_sdk_evidence_artifact(
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
+    """Runtime health plus dependency snapshot (database, Redis)."""
+    deps = dependency_components_status()
+    degraded = any(
+        deps.get(k) not in {"ok", "unconfigured"}
+        for k in ("database", "redis")
+        if k in deps
+    )
     try:
         orchestrator_type = type(shared_orchestrator).__name__
-        has_health_check = hasattr(shared_orchestrator, 'health_check')
-        
+        has_health_check = hasattr(shared_orchestrator, "health_check")
+
         if has_health_check:
             shared_orchestrator.health_check()
-        
-        return {
-            "status": "ok",
+
+        body: dict[str, Any] = {
+            "status": "degraded" if degraded else "ok",
             "orchestrator": orchestrator_type,
             "has_health_check": has_health_check,
             "runtime_mode": getattr(shared_orchestrator, "mode", "full"),
             "runtime_degraded_reason": getattr(shared_orchestrator, "degraded_reason", None),
+            "dependencies": deps,
         }
+        if degraded:
+            return JSONResponse(status_code=503, content=body)
+        return body
     except Exception as e:
         logger.error(f"Health check failed: {e}", exc_info=True)
         return JSONResponse(
             status_code=503,
-            content={"status": "degraded", "error": "health_check_failed", "details": {"exception_type": type(e).__name__}},
+            content={
+                "status": "degraded",
+                "error": "health_check_failed",
+                "details": {"exception_type": type(e).__name__},
+                "dependencies": deps,
+            },
         )
 
 
 @app.get("/v1/sessions/{session_id}/cluster")
-def get_session_cluster(session_id: str):
+def get_session_cluster(
+    session_id: str,
+    _legacy: dict | None = Depends(require_legacy_rest_auth),
+):
     """Get connected sessions in the identity graph."""
     cluster = shared_orchestrator.get_session_cluster(session_id)
     return {"session_id": session_id, "cluster": list(cluster)}
 
 
 @app.post("/v1/sessions/{session_id}/reset")
-def reset_session(session_id: str):
+def reset_session(
+    session_id: str,
+    _legacy: dict | None = Depends(require_legacy_rest_auth),
+):
     """Reset session memory."""
     shared_orchestrator.memory.clear(session_id)
     return {"session_id": session_id, "status": "reset"}

@@ -2,7 +2,7 @@
 TruePresence Auth Router
 
 Handles user authentication, JWT token issuance, and user management.
-Roles: super_admin | reviewer | observer
+Roles: super_admin | admin | reviewer | observer
 """
 
 from __future__ import annotations
@@ -15,16 +15,21 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError as JoseJWTError
 from jose import jwt
 from pydantic import BaseModel
 
+from truepresence.api.rate_limit import limiter as http_limiter
 from truepresence.db import get_db
 from truepresence.runtime.distributed import DistributedRuntime
 
 logger = logging.getLogger(__name__)
+
+
+def _redis_url() -> str:
+    return os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,7 +38,8 @@ TOKEN_EXPIRE_HOURS = 24
 DEV_FALLBACK_SECRET = "truepresence-dev-only-jwt-secret"
 
 ROLE_HIERARCHY = {
-    "super_admin": 3,
+    "super_admin": 4,
+    "admin": 3,
     "reviewer": 2,
     "observer": 1,
 }
@@ -151,14 +157,6 @@ def create_token(user_id: int, email: str, role: str, tenant_id: str) -> str:
     return jwt.encode(payload, get_secret_key(), algorithm=ALGORITHM)
 
 
-def get_limiter():
-    """Get rate limiter from app state."""
-    from slowapi import Limiter
-    from slowapi.util import get_remote_address
-
-    return Limiter(key_func=get_remote_address)
-
-
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, get_secret_key(), algorithms=[ALGORITHM])
@@ -170,7 +168,7 @@ def decode_token(token: str) -> dict:
 def _load_current_user_record(user_id: str) -> Dict[str, Any]:
     # Try cache first
     try:
-        dist = DistributedRuntime()
+        dist = DistributedRuntime(redis_url=_redis_url())
         cache_key = f"user_cache:{user_id}"
         cached_user = dist.load_session(cache_key)
         if cached_user:
@@ -199,7 +197,7 @@ def _load_current_user_record(user_id: str) -> Dict[str, Any]:
 
     # Store in cache for 1 hour
     try:
-        dist = DistributedRuntime()
+        dist = DistributedRuntime(redis_url=_redis_url())
         dist.store_session(f"user_cache:{user_id}", user_dict)
     except Exception as exc:
         logger.warning("Failed to store user record in cache (non-fatal): %s", exc)
@@ -219,31 +217,25 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
     return user
 
 
-def require_role(minimum_role: str):
-    """Dependency that enforces minimum role level from current DB state."""
-
-    def checker(user: dict = Depends(get_current_user)) -> dict:  # noqa: B008
-        user_level = ROLE_HIERARCHY.get(user.get("role"), 0)
-        required_level = ROLE_HIERARCHY.get(minimum_role, 0)
-        if user_level < required_level:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        return user
-
-    return checker
+    """Only the platform super_admin role may manage auth directory users."""
+    if user.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    return user
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(request: LoginRequest):
+@http_limiter.limit("15/minute")
+def login(request: Request, credentials: LoginRequest):
     """Authenticate user and return JWT."""
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT * FROM users WHERE email = %s AND active = TRUE",
-                (request.email.lower(),),
+                (credentials.email.lower(),),
             )
             user = cur.fetchone()
 
-    if not user or not verify_password(request.password, user["password"]):
+    if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     with get_db() as conn:
@@ -274,7 +266,7 @@ def get_me(user: dict = Depends(get_current_user)):  # noqa: B008
     return user
 
 
-@router.post("/users", dependencies=[Depends(require_role("super_admin"))])
+@router.post("/users", dependencies=[Depends(require_super_admin)])
 def create_user(request: CreateUserRequest):
     """Create a new user — super_admin only."""
     if request.role not in ROLE_HIERARCHY:
@@ -304,7 +296,7 @@ def create_user(request: CreateUserRequest):
     return dict(new_user)
 
 
-@router.get("/users", dependencies=[Depends(require_role("super_admin"))])
+@router.get("/users", dependencies=[Depends(require_super_admin)])
 def list_users():
     """List all users — super_admin only."""
     with get_db() as conn:
@@ -315,7 +307,7 @@ def list_users():
             return cur.fetchall()
 
 
-@router.patch("/users/{user_id}", dependencies=[Depends(require_role("super_admin"))])
+@router.patch("/users/{user_id}", dependencies=[Depends(require_super_admin)])
 def update_user(user_id: int, request: UpdateUserRequest):
     """Update user role, active status, or tenant — super_admin only."""
     VALID_USER_COLUMNS = {"name", "role", "active", "tenant_id"}
@@ -348,14 +340,14 @@ def update_user(user_id: int, request: UpdateUserRequest):
 
     # Invalidate cache
     try:
-        DistributedRuntime().delete_session(f"user_cache:{user_id}")
+        DistributedRuntime(redis_url=_redis_url()).delete_session(f"user_cache:{user_id}")
     except Exception as exc:
         logger.warning("Failed to invalidate user cache after update (non-fatal): %s", exc)
 
     return dict(updated)
 
 
-@router.delete("/users/{user_id}", dependencies=[Depends(require_role("super_admin"))])
+@router.delete("/users/{user_id}", dependencies=[Depends(require_super_admin)])
 def deactivate_user(user_id: int):
     """Deactivate a user (soft delete) — super_admin only."""
     with get_db() as conn:
@@ -371,7 +363,7 @@ def deactivate_user(user_id: int):
 
     # Invalidate cache
     try:
-        DistributedRuntime().delete_session(f"user_cache:{user_id}")
+        DistributedRuntime(redis_url=_redis_url()).delete_session(f"user_cache:{user_id}")
     except Exception as exc:
         logger.warning("Failed to invalidate user cache after deactivation (non-fatal): %s", exc)
 

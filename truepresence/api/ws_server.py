@@ -1,4 +1,5 @@
 import json
+import os
 import time
 import uuid
 from collections import defaultdict
@@ -35,10 +36,70 @@ CHALLENGE_PROMPTS = [
 ]
 
 
+def _redis_client():
+    url = os.environ.get("REDIS_URL")
+    if not url:
+        return None
+    try:
+        from truepresence.runtime.distributed import DistributedRuntime
+
+        dr = DistributedRuntime(redis_url=url)
+        if dr.available and dr.redis_client:
+            return dr.redis_client
+    except Exception:
+        pass
+    return None
+
+
+_MODE_KEY = "truepresence:ws:mode:{}"
+_COOLDOWN_KEY = "truepresence:ws:cooldown:{}"
+
+
+def _get_session_mode(session_id: str) -> str:
+    rc = _redis_client()
+    if rc:
+        v = rc.get(_MODE_KEY.format(session_id))
+        if v is not None:
+            return str(v)
+    return session_modes.get(session_id, "production")
+
+
+def _set_session_mode(session_id: str, mode: str) -> None:
+    session_modes[session_id] = mode
+    rc = _redis_client()
+    if rc:
+        rc.set(_MODE_KEY.format(session_id), mode, ex=86400)
+
+
+def _get_challenge_last(session_id: str) -> float:
+    rc = _redis_client()
+    if rc:
+        v = rc.get(_COOLDOWN_KEY.format(session_id))
+        if v is not None:
+            return float(v)
+    return float(challenge_last_issued.get(session_id, 0.0))
+
+
+def _set_challenge_last(session_id: str, ts: float) -> None:
+    challenge_last_issued[session_id] = ts
+    rc = _redis_client()
+    if rc:
+        rc.set(_COOLDOWN_KEY.format(session_id), str(ts), ex=3600)
+
+
+def _extract_ws_token(websocket: WebSocket) -> str | None:
+    token = websocket.query_params.get("token")
+    if token:
+        return token
+    auth = websocket.headers.get("authorization") or websocket.headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return websocket.cookies.get("truepresence_token")
+
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    # Validate JWT token from query parameter
-    token = websocket.query_params.get("token")
+    token = _extract_ws_token(websocket)
     if not token:
         await websocket.close(code=4001, reason="Missing authentication token")
         return
@@ -52,8 +113,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
     connections[session_id].append(websocket)
 
-    # Get session mode (default to "production" if not set)
-    session_mode = session_modes.get(session_id, "production")
+    session_mode = _get_session_mode(session_id)
 
     await websocket.send_json({
         "type": "welcome",
@@ -72,7 +132,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             # Handle mode setting (for test/gatekeeper modes)
             if event.get("event_type") == "set_mode":
                 session_mode = event.get("payload", {}).get("mode", "production")
-                session_modes[session_id] = session_mode
+                _set_session_mode(session_id, session_mode)
                 continue
 
             # 1. Handle Challenge Responses (Phase 2)
@@ -123,7 +183,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             # 4. Adaptive Challenge Injection (Uncertainty Zone) with cooldown
             score = trust_score
             current_time = time.time()
-            last_challenge_time = challenge_last_issued.get(session_id, 0)
+            last_challenge_time = _get_challenge_last(session_id)
             time_since_last_challenge = current_time - last_challenge_time
 
             if 0.35 < score < 0.75 and time_since_last_challenge >= CHALLENGE_COOLDOWN_SECONDS:
@@ -132,7 +192,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "prompt": CHALLENGE_PROMPTS[stable_index(session_id, len(CHALLENGE_PROMPTS))],
                     "created_at": current_time
                 }
-                challenge_last_issued[session_id] = current_time
+                _set_challenge_last(session_id, current_time)
                 # Track in validator
                 validator.issue_challenge(session_id, challenge["prompt"])
                 await websocket.send_json({
